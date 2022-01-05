@@ -1,0 +1,7 @@
+export VK_LAYER_PATH=$VULKAN_SDK/Bin
+export VK_INSTANCE_LAYERS=VK_LAYER_KHRONOS_validation
+
+cargo run
+
+export VK_LAYER_PATH=
+export VK_INSTANCE_LAYERS=
