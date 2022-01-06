@@ -2,18 +2,30 @@
 
 Vulkan ray tracing in Rust with [ash][ash].
 
-## Run
+## Examples
 
-PowerShell
+You can run one of the following example.
+
+- triangle_basic: Ray traced triangle with simple Vulkan setup (no frames in flight) and all code in one file.
+- triangle_advanced: Ray traced triangle with a Vulan setup a bit more involved and using some abstractions.
 
 ```ps1
-$env:VK_LAYER_PATH = "$env:VULKAN_SDK\Bin"
-$env:VK_INSTANCE_LAYERS = "VK_LAYER_KHRONOS_validation"
+# Powershell example (all scripts have a .sh version)
+
+# Compile all glsl shaders to spir-v 1.4
+.\scripts\compile_shaders.ps1
+
+# Enable validation layers and set log level to debug
+.\scripts\debug.ps1 triangle_basic
+
+# Compiles with --release and set log level to info
+.\scripts\run.ps1 triangle_basic
 ```
 
-Bash
-```sh
 
-```
+## Useful links
+
+- [NVidia tutorial](https://nvpro-samples.github.io/vk_raytracing_tutorial_KHR/)
+- [SaschaWillems' Vulkan](https://github.com/SaschaWillems/Vulkan)
 
 [ash]: https://github.com/MaikKlein/ash
