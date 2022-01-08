@@ -1,5 +1,5 @@
 [package]
-name = "vulkan-raytracing-rs"
+name = "vulkan"
 version = "0.1.0"
 edition = "2021"
 
@@ -7,11 +7,8 @@ edition = "2021"
 
 [dependencies]
 log = "0.4"
-simple_logger = "1.11"
 anyhow = "1.0"
 ash = { version = "0.35", features = ["linked"] }
 ash-window = "0.9"
+raw-window-handle = "0.4"
 gpu-allocator = { version = "0.15", default-features = false, features = ["vulkan"] }
-winit = "0.26"
-
-vulkan = { path = "../libs/vulkan" }

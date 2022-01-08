@@ -872,6 +872,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "49874b5167b65d7193b8aba1567f5c7d93d001cafc34600cee003eda787e483f"
 
 [[package]]
+name = "vulkan"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "ash",
+ "ash-window",
+ "gpu-allocator",
+ "log",
+ "raw-window-handle 0.4.2",
+]
+
+[[package]]
 name = "vulkan-raytracing-rs"
 version = "0.1.0"
 dependencies = [
@@ -881,6 +893,7 @@ dependencies = [
  "gpu-allocator",
  "log",
  "simple_logger",
+ "vulkan",
  "winit",
 ]
 

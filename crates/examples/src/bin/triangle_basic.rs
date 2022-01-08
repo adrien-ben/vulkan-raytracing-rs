@@ -835,22 +835,12 @@ fn create_bottom_as(
     #[allow(dead_code)]
     struct Vertex {
         pos: [f32; 2],
-        col: [f32; 3],
     }
 
     const VERTICES: [Vertex; 3] = [
-        Vertex {
-            pos: [-1.0, 1.0],
-            col: [1.0, 0.0, 0.0],
-        },
-        Vertex {
-            pos: [1.0, 1.0],
-            col: [0.0, 1.0, 0.0],
-        },
-        Vertex {
-            pos: [0.0, -1.0],
-            col: [0.0, 0.0, 1.0],
-        },
+        Vertex { pos: [-1.0, 1.0] },
+        Vertex { pos: [1.0, 1.0] },
+        Vertex { pos: [0.0, -1.0] },
     ];
 
     let vertex_buffer = create_buffer(
@@ -1200,18 +1190,20 @@ fn create_pipeline(
     let pipe_layout = unsafe { device.create_pipeline_layout(&pipe_layout_info, None)? };
 
     // shader groups
-    let raygen_source =
-        read_shader_from_bytes(&include_bytes!("../../../../assets/shaders/basic/raygen.rgen.spv")[..])?;
+    let raygen_source = read_shader_from_bytes(
+        &include_bytes!("../../../../assets/shaders/triangle/raygen.rgen.spv")[..],
+    )?;
     let raygen_create_info = vk::ShaderModuleCreateInfo::builder().code(&raygen_source);
     let raygen_module = unsafe { device.create_shader_module(&raygen_create_info, None)? };
 
-    let miss_source =
-        read_shader_from_bytes(&include_bytes!("../../../../assets/shaders/basic/miss.rmiss.spv")[..])?;
+    let miss_source = read_shader_from_bytes(
+        &include_bytes!("../../../../assets/shaders/triangle/miss.rmiss.spv")[..],
+    )?;
     let miss_create_info = vk::ShaderModuleCreateInfo::builder().code(&miss_source);
     let miss_module = unsafe { device.create_shader_module(&miss_create_info, None)? };
 
     let closesthit_source = read_shader_from_bytes(
-        &include_bytes!("../../../../assets/shaders/basic/closesthit.rchit.spv")[..],
+        &include_bytes!("../../../../assets/shaders/triangle/closesthit.rchit.spv")[..],
     )?;
     let closesthit_create_info = vk::ShaderModuleCreateInfo::builder().code(&closesthit_source);
     let closesthit_module = unsafe { device.create_shader_module(&closesthit_create_info, None)? };

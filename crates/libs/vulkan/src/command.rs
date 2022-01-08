@@ -1,0 +1,274 @@
+use std::sync::Arc;
+
+use anyhow::Result;
+use ash::vk;
+
+use crate::{
+    device::VkDevice, VkBuffer, VkContext, VkDescriptorSet, VkImage, VkPipeline, VkPipelineLayout,
+    VkQueueFamily, VkRayTracingContext, VkShaderBindingTable,
+};
+
+pub struct VkCommandPool {
+    device: Arc<VkDevice>,
+    ray_tracing: Arc<VkRayTracingContext>,
+    pub(crate) inner: vk::CommandPool,
+}
+
+impl VkCommandPool {
+    pub(crate) fn new(
+        device: Arc<VkDevice>,
+        ray_tracing: Arc<VkRayTracingContext>,
+        queue_family: VkQueueFamily,
+        flags: Option<vk::CommandPoolCreateFlags>,
+    ) -> Result<Self> {
+        let flags = flags.unwrap_or_else(vk::CommandPoolCreateFlags::empty);
+
+        let command_pool_info = vk::CommandPoolCreateInfo::builder()
+            .queue_family_index(queue_family.index)
+            .flags(flags);
+        let inner = unsafe { device.inner.create_command_pool(&command_pool_info, None)? };
+
+        Ok(Self {
+            device,
+            ray_tracing,
+            inner,
+        })
+    }
+
+    pub fn allocate_command_buffers(
+        &self,
+        level: vk::CommandBufferLevel,
+        count: u32,
+    ) -> Result<Vec<VkCommandBuffer>> {
+        let allocate_info = vk::CommandBufferAllocateInfo::builder()
+            .command_pool(self.inner)
+            .level(level)
+            .command_buffer_count(count);
+
+        let buffers = unsafe { self.device.inner.allocate_command_buffers(&allocate_info)? };
+        let buffers = buffers
+            .into_iter()
+            .map(|inner| VkCommandBuffer {
+                device: self.device.clone(),
+                ray_tracing: self.ray_tracing.clone(),
+                inner,
+            })
+            .collect();
+
+        Ok(buffers)
+    }
+
+    pub fn allocate_command_buffer(
+        &self,
+        level: vk::CommandBufferLevel,
+    ) -> Result<VkCommandBuffer> {
+        let buffers = self.allocate_command_buffers(level, 1)?;
+        let buffer = buffers.into_iter().next().unwrap();
+
+        Ok(buffer)
+    }
+
+    pub fn free_command_buffers(&self, buffer: &[VkCommandBuffer]) {
+        let buffs = buffer.iter().map(|b| b.inner).collect::<Vec<_>>();
+        unsafe { self.device.inner.free_command_buffers(self.inner, &buffs) };
+    }
+
+    pub fn free_command_buffer(&self, buffer: &VkCommandBuffer) -> Result<()> {
+        let buffs = [buffer.inner];
+        unsafe { self.device.inner.free_command_buffers(self.inner, &buffs) };
+
+        Ok(())
+    }
+}
+
+impl VkContext {
+    pub fn create_command_pool(
+        &self,
+        queue_family: VkQueueFamily,
+        flags: Option<vk::CommandPoolCreateFlags>,
+    ) -> Result<VkCommandPool> {
+        VkCommandPool::new(
+            self.device.clone(),
+            self.ray_tracing.clone(),
+            queue_family,
+            flags,
+        )
+    }
+}
+
+impl Drop for VkCommandPool {
+    fn drop(&mut self) {
+        unsafe { self.device.inner.destroy_command_pool(self.inner, None) };
+    }
+}
+
+pub struct VkCommandBuffer {
+    device: Arc<VkDevice>,
+    ray_tracing: Arc<VkRayTracingContext>,
+    pub(crate) inner: vk::CommandBuffer,
+}
+
+impl VkCommandBuffer {
+    pub fn begin(&self, flags: vk::CommandBufferUsageFlags) -> Result<()> {
+        let begin_info = vk::CommandBufferBeginInfo::builder().flags(flags);
+        unsafe {
+            self.device
+                .inner
+                .begin_command_buffer(self.inner, &begin_info)?
+        };
+
+        Ok(())
+    }
+
+    pub fn end(&self) -> Result<()> {
+        unsafe { self.device.inner.end_command_buffer(self.inner)? };
+
+        Ok(())
+    }
+
+    pub fn bind_pipeline(&self, bind_point: vk::PipelineBindPoint, pipeline: &VkPipeline) {
+        unsafe {
+            self.device
+                .inner
+                .cmd_bind_pipeline(self.inner, bind_point, pipeline.inner)
+        }
+    }
+
+    pub fn bind_descriptor_set(
+        &self,
+        bind_point: vk::PipelineBindPoint,
+        layout: &VkPipelineLayout,
+        set: &VkDescriptorSet,
+    ) {
+        unsafe {
+            self.device.inner.cmd_bind_descriptor_sets(
+                self.inner,
+                bind_point,
+                layout.inner,
+                0,
+                &[set.inner],
+                &[],
+            )
+        }
+    }
+
+    pub fn copy_buffer(&self, src_buffer: &VkBuffer, dst_buffer: &VkBuffer) {
+        unsafe {
+            let region = vk::BufferCopy::builder().size(src_buffer.size);
+            self.device.inner.cmd_copy_buffer(
+                self.inner,
+                src_buffer.inner,
+                dst_buffer.inner,
+                std::slice::from_ref(&region),
+            )
+        };
+    }
+
+    pub fn transition_layout(
+        &self,
+        image: &VkImage,
+        old_layout: vk::ImageLayout,
+        new_layout: vk::ImageLayout,
+        src_access_mask: vk::AccessFlags,
+        dst_access_mask: vk::AccessFlags,
+        src_stage_mask: vk::PipelineStageFlags,
+        dst_stage_mask: vk::PipelineStageFlags,
+    ) {
+        let barrier = vk::ImageMemoryBarrier::builder()
+            .old_layout(old_layout)
+            .new_layout(new_layout)
+            .image(image.inner)
+            .subresource_range(vk::ImageSubresourceRange {
+                aspect_mask: vk::ImageAspectFlags::COLOR,
+                base_mip_level: 0,
+                level_count: 1,
+                base_array_layer: 0,
+                layer_count: 1,
+            })
+            .src_access_mask(src_access_mask)
+            .dst_access_mask(dst_access_mask)
+            .build();
+
+        unsafe {
+            self.device.inner.cmd_pipeline_barrier(
+                self.inner,
+                src_stage_mask,
+                dst_stage_mask,
+                vk::DependencyFlags::empty(),
+                &[],
+                &[],
+                &[barrier],
+            )
+        };
+    }
+
+    pub fn copy_image(
+        &self,
+        src_image: &VkImage,
+        src_layout: vk::ImageLayout,
+        dst_image: &VkImage,
+        dst_layout: vk::ImageLayout,
+    ) {
+        let region = vk::ImageCopy::builder()
+            .src_subresource(vk::ImageSubresourceLayers {
+                aspect_mask: vk::ImageAspectFlags::COLOR,
+                base_array_layer: 0,
+                mip_level: 0,
+                layer_count: 1,
+            })
+            .dst_subresource(vk::ImageSubresourceLayers {
+                aspect_mask: vk::ImageAspectFlags::COLOR,
+                base_array_layer: 0,
+                mip_level: 0,
+                layer_count: 1,
+            })
+            .extent(vk::Extent3D {
+                width: src_image.extent.width,
+                height: src_image.extent.height,
+                depth: 1,
+            });
+
+        unsafe {
+            self.device.inner.cmd_copy_image(
+                self.inner,
+                src_image.inner,
+                src_layout,
+                dst_image.inner,
+                dst_layout,
+                std::slice::from_ref(&region),
+            )
+        };
+    }
+
+    pub fn build_acceleration_structures(
+        &self,
+        as_build_geo_info: &vk::AccelerationStructureBuildGeometryInfoKHR,
+        as_build_range_info: &vk::AccelerationStructureBuildRangeInfoKHR,
+    ) {
+        unsafe {
+            self.ray_tracing
+                .acceleration_structure_fn
+                .cmd_build_acceleration_structures(
+                    self.inner,
+                    std::slice::from_ref(as_build_geo_info),
+                    std::slice::from_ref(&std::slice::from_ref(as_build_range_info)),
+                )
+        };
+    }
+
+    pub fn trace_rays(&self, shader_binding_table: &VkShaderBindingTable, width: u32, height: u32) {
+        let empty_region = vk::StridedDeviceAddressRegionKHR::builder();
+        unsafe {
+            self.ray_tracing.pipeline_fn.cmd_trace_rays(
+                self.inner,
+                &shader_binding_table.raygen_region,
+                &shader_binding_table.miss_region,
+                &shader_binding_table.hit_region,
+                &empty_region,
+                width,
+                height,
+                1,
+            )
+        };
+    }
+}
