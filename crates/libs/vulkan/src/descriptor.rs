@@ -3,7 +3,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use ash::vk;
 
-use crate::{device::VkDevice, VkAccelerationStructure, VkContext, VkImageView};
+use crate::{device::VkDevice, VkAccelerationStructure, VkBuffer, VkContext, VkImageView};
 
 pub struct VkDescriptorSetLayout {
     device: Arc<VkDevice>,
@@ -128,8 +128,49 @@ impl VkDescriptorSet {
                         .update_descriptor_sets(std::slice::from_ref(&write), &[])
                 };
             }
+            UniformBuffer { buffer } => {
+                update_buffer_descriptor_sets(
+                    &self.device,
+                    self,
+                    write.binding,
+                    buffer,
+                    vk::DescriptorType::UNIFORM_BUFFER,
+                );
+            }
+            StorageBuffer { buffer } => {
+                update_buffer_descriptor_sets(
+                    &self.device,
+                    self,
+                    write.binding,
+                    buffer,
+                    vk::DescriptorType::STORAGE_BUFFER,
+                );
+            }
         }
     }
+}
+
+fn update_buffer_descriptor_sets(
+    device: &VkDevice,
+    set: &VkDescriptorSet,
+    binding: u32,
+    buffer: &VkBuffer,
+    descriptor_type: vk::DescriptorType,
+) {
+    let buffer_info = vk::DescriptorBufferInfo::builder()
+        .buffer(buffer.inner)
+        .range(vk::WHOLE_SIZE);
+    let write = vk::WriteDescriptorSet::builder()
+        .descriptor_type(descriptor_type)
+        .dst_binding(binding)
+        .dst_set(set.inner)
+        .buffer_info(std::slice::from_ref(&buffer_info));
+
+    unsafe {
+        device
+            .inner
+            .update_descriptor_sets(std::slice::from_ref(&write), &[])
+    };
 }
 
 pub struct VkDescriptorSets {
@@ -170,5 +211,11 @@ pub enum VkWriteDescriptorSetKind<'a> {
     },
     AccelerationStructure {
         acceleration_structure: &'a VkAccelerationStructure,
+    },
+    UniformBuffer {
+        buffer: &'a VkBuffer,
+    },
+    StorageBuffer {
+        buffer: &'a VkBuffer,
     },
 }

@@ -1,8 +1,13 @@
 use anyhow::Result;
 use ash::vk::{self, Packed24_8};
+use glam::{vec3, Mat4};
+use gltf::Vertex;
 use gpu_allocator::MemoryLocation;
 use simple_logger::SimpleLogger;
-use std::{ffi::CString, mem::size_of};
+use std::{
+    ffi::CString,
+    mem::{size_of, size_of_val},
+};
 use vulkan::utils::*;
 use vulkan::*;
 use winit::{
@@ -15,7 +20,7 @@ use winit::{
 const WIDTH: u32 = 1024;
 const HEIGHT: u32 = 576;
 const IN_FLIGHT_FRAMES: u32 = 2;
-const APP_NAME: &str = "Triangle advanced";
+const APP_NAME: &str = "Shadows";
 
 fn main() -> Result<()> {
     SimpleLogger::default().env().init()?;
@@ -79,8 +84,9 @@ fn create_window() -> (Window, EventLoop<()>) {
 
 struct BottomAS {
     inner: VkAccelerationStructure,
-    _vertex_buffer: VkBuffer,
-    _index_buffer: VkBuffer,
+    vertex_buffer: VkBuffer,
+    index_buffer: VkBuffer,
+    geometry_info_buffer: VkBuffer,
 }
 
 struct TopAS {
@@ -93,12 +99,28 @@ struct ImageAndView {
     image: VkImage,
 }
 
+#[derive(Debug, Clone, Copy)]
+#[repr(C)]
+pub struct CameraUBO {
+    inverted_view: Mat4,
+    inverted_proj: Mat4,
+}
+
+#[derive(Debug, Clone, Copy)]
+#[repr(C)]
+pub struct GeometryInfo {
+    transform: Mat4,
+    vertex_offset: u32,
+    index_offset: u32,
+}
+
 struct App {
     swapchain: VkSwapchain,
     command_pool: VkCommandPool,
     _descriptor_set_layout: VkDescriptorSetLayout,
     pipeline_layout: VkPipelineLayout,
     pipeline: VkPipeline,
+    _ubo_buffer: VkBuffer,
     _bottom_as: BottomAS,
     _top_as: TopAS,
     storage_images: Vec<ImageAndView>,
@@ -134,6 +156,9 @@ impl App {
         // Swapchain
         let swapchain = VkSwapchain::new(&context, WIDTH, HEIGHT)?;
 
+        // UBO
+        let ubo_buffer = create_ubo_buffer(&context)?;
+
         // Bottom AS
         let bottom_as = create_bottom_as(&mut context)?;
 
@@ -155,16 +180,22 @@ impl App {
         let sbt = context.create_shader_binding_table(
             &pipeline,
             VkShaderBindingTableDesc {
-                group_count: 3,
+                group_count: 4,
                 raygen_shader_count: 1,
-                miss_shader_count: 1,
+                miss_shader_count: 2,
                 hit_shader_count: 1,
             },
         )?;
 
         // RT Descriptor sets
-        let (descriptor_pool, descriptor_sets) =
-            create_descriptor_sets(&context, &descriptor_set_layout, &top_as, &storage_images)?;
+        let (descriptor_pool, descriptor_sets) = create_descriptor_sets(
+            &context,
+            &descriptor_set_layout,
+            &bottom_as,
+            &top_as,
+            &storage_images,
+            &ubo_buffer,
+        )?;
 
         // Create and record command buffers (one per swapchain frame)
         let command_buffers = create_and_record_command_buffers(
@@ -187,6 +218,7 @@ impl App {
             _descriptor_set_layout: descriptor_set_layout,
             pipeline_layout,
             pipeline,
+            _ubo_buffer: ubo_buffer,
             _bottom_as: bottom_as,
             _top_as: top_as,
             storage_images,
@@ -315,76 +347,155 @@ impl Drop for App {
     }
 }
 
-fn create_bottom_as(context: &mut VkContext) -> Result<BottomAS> {
-    // Triangle geo
-    #[derive(Debug, Clone, Copy)]
-    #[allow(dead_code)]
-    struct Vertex {
-        pos: [f32; 2],
-    }
+fn create_ubo_buffer(context: &VkContext) -> Result<VkBuffer> {
+    let view = Mat4::look_at_rh(
+        vec3(-1.0, 1.5, 3.0),
+        vec3(0.0, 1.0, 0.0),
+        vec3(0.0, 1.0, 0.0),
+    );
+    let inverted_view = view.inverse();
 
-    const VERTICES: [Vertex; 3] = [
-        Vertex { pos: [-1.0, 1.0] },
-        Vertex { pos: [1.0, 1.0] },
-        Vertex { pos: [0.0, -1.0] },
-    ];
+    let proj = Mat4::perspective_infinite_rh(60f32.to_radians(), WIDTH as f32 / HEIGHT as f32, 0.1);
+    let inverted_proj = proj.inverse();
+
+    let cam_ubo = CameraUBO {
+        inverted_view,
+        inverted_proj,
+    };
+
+    let ubo_buffer = context.create_buffer(
+        vk::BufferUsageFlags::UNIFORM_BUFFER,
+        MemoryLocation::CpuToGpu,
+        size_of_val(&cam_ubo) as _,
+    )?;
+
+    ubo_buffer.copy_data_to_buffer(&[cam_ubo])?;
+
+    Ok(ubo_buffer)
+}
+
+fn create_bottom_as(context: &mut VkContext) -> Result<BottomAS> {
+    let model = gltf::load_file("./crates/examples/assets/models/cesium_man_with_light.glb")?;
+    let vertices = model.vertices.as_slice();
+    let indices = model.indices.as_slice();
 
     let vertex_buffer = create_gpu_only_buffer_from_data(
         context,
         vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS
-            | vk::BufferUsageFlags::ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR,
-        &VERTICES,
+            | vk::BufferUsageFlags::ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR
+            | vk::BufferUsageFlags::STORAGE_BUFFER,
+        vertices,
     )?;
     let vertex_buffer_addr = vertex_buffer.get_device_address();
-
-    const INDICES: [u16; 3] = [0, 1, 2];
 
     let index_buffer = create_gpu_only_buffer_from_data(
         context,
         vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS
-            | vk::BufferUsageFlags::ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR,
-        &INDICES,
+            | vk::BufferUsageFlags::ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR
+            | vk::BufferUsageFlags::STORAGE_BUFFER,
+        indices,
     )?;
     let index_buffer_addr = index_buffer.get_device_address();
 
+    let transforms = model
+        .nodes
+        .iter()
+        .map(|n| {
+            let transform = n.transform;
+            let r0 = transform[0];
+            let r1 = transform[1];
+            let r2 = transform[2];
+            let r3 = transform[3];
+
+            #[rustfmt::skip]
+            let matrix = [
+                r0[0], r1[0], r2[0], r3[0],
+                r0[1], r1[1], r2[1], r3[1],
+                r0[2], r1[2], r2[2], r3[2],
+            ];
+
+            vk::TransformMatrixKHR { matrix }
+        })
+        .collect::<Vec<_>>();
+    let transform_buffer = create_gpu_only_buffer_from_data(
+        context,
+        vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS
+            | vk::BufferUsageFlags::ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR,
+        &transforms,
+    )?;
+    let transform_buffer_addr = transform_buffer.get_device_address();
+
     let as_geo_triangles_data = vk::AccelerationStructureGeometryTrianglesDataKHR::builder()
-        .vertex_format(vk::Format::R32G32_SFLOAT)
+        .vertex_format(vk::Format::R32G32B32_SFLOAT)
         .vertex_data(vk::DeviceOrHostAddressConstKHR {
             device_address: vertex_buffer_addr,
         })
         .vertex_stride(size_of::<Vertex>() as _)
-        .index_type(vk::IndexType::UINT16)
+        .max_vertex(vertices.len() as _)
+        .index_type(vk::IndexType::UINT32)
         .index_data(vk::DeviceOrHostAddressConstKHR {
             device_address: index_buffer_addr,
         })
-        .max_vertex(INDICES.len() as _)
-        .build();
-
-    let as_struct_geo = vk::AccelerationStructureGeometryKHR::builder()
-        .geometry_type(vk::GeometryTypeKHR::TRIANGLES)
-        .flags(vk::GeometryFlagsKHR::OPAQUE)
-        .geometry(vk::AccelerationStructureGeometryDataKHR {
-            triangles: as_geo_triangles_data,
+        .transform_data(vk::DeviceOrHostAddressConstKHR {
+            device_address: transform_buffer_addr,
         })
         .build();
 
-    let build_range_info = vk::AccelerationStructureBuildRangeInfoKHR::builder()
-        .first_vertex(0)
-        .primitive_count(1)
-        .primitive_offset(0)
-        .transform_offset(0)
-        .build();
+    let mut geometry_infos = vec![];
+    let mut as_geometries = vec![];
+    let mut as_ranges = vec![];
+    let mut max_primitive_counts = vec![];
+
+    for (node_index, node) in model.nodes.iter().enumerate() {
+        let mesh = node.mesh;
+
+        let primitive_count = (mesh.index_count / 3) as u32;
+
+        geometry_infos.push(GeometryInfo {
+            transform: Mat4::from_cols_array_2d(&node.transform),
+            vertex_offset: mesh.vertex_offset,
+            index_offset: mesh.index_offset,
+        });
+
+        as_geometries.push(
+            vk::AccelerationStructureGeometryKHR::builder()
+                .geometry_type(vk::GeometryTypeKHR::TRIANGLES)
+                .flags(vk::GeometryFlagsKHR::OPAQUE)
+                .geometry(vk::AccelerationStructureGeometryDataKHR {
+                    triangles: as_geo_triangles_data,
+                })
+                .build(),
+        );
+
+        as_ranges.push(
+            vk::AccelerationStructureBuildRangeInfoKHR::builder()
+                .first_vertex(mesh.vertex_offset)
+                .primitive_count(primitive_count)
+                .primitive_offset(mesh.index_offset * size_of::<u32>() as u32)
+                .transform_offset((node_index * size_of::<vk::TransformMatrixKHR>()) as u32)
+                .build(),
+        );
+
+        max_primitive_counts.push(primitive_count)
+    }
+
+    let geometry_info_buffer = create_gpu_only_buffer_from_data(
+        context,
+        vk::BufferUsageFlags::STORAGE_BUFFER,
+        &geometry_infos,
+    )?;
 
     let inner = context.create_bottom_level_acceleration_structure(
-        &[as_struct_geo],
-        &[build_range_info],
-        &[1],
+        &as_geometries,
+        &as_ranges,
+        &max_primitive_counts,
     )?;
 
     Ok(BottomAS {
         inner,
-        _vertex_buffer: vertex_buffer,
-        _index_buffer: index_buffer,
+        vertex_buffer,
+        index_buffer,
+        geometry_info_buffer,
     })
 }
 
@@ -401,10 +512,7 @@ fn create_top_as(context: &mut VkContext, bottom_as: &BottomAS) -> Result<TopAS>
         instance_custom_index_and_mask: Packed24_8::new(0, 0xFF),
         instance_shader_binding_table_record_offset_and_flags: Packed24_8::new(
             0,
-            vk::GeometryInstanceFlagsKHR::TRIANGLE_FACING_CULL_DISABLE
-                .as_raw()
-                .try_into()
-                .unwrap(),
+            vk::GeometryInstanceFlagsKHR::TRIANGLE_FACING_CULL_DISABLE.as_raw() as _,
         ),
         acceleration_structure_reference: vk::AccelerationStructureReferenceKHR {
             device_handle: bottom_as.inner.address,
@@ -432,18 +540,15 @@ fn create_top_as(context: &mut VkContext, bottom_as: &BottomAS) -> Result<TopAS>
         })
         .build();
 
-    let build_range_info = vk::AccelerationStructureBuildRangeInfoKHR::builder()
+    let as_ranges = vk::AccelerationStructureBuildRangeInfoKHR::builder()
         .first_vertex(0)
         .primitive_count(1)
         .primitive_offset(0)
         .transform_offset(0)
         .build();
 
-    let inner = context.create_top_level_acceleration_structure(
-        &[as_struct_geo],
-        &[build_range_info],
-        &[1],
-    )?;
+    let inner =
+        context.create_top_level_acceleration_structure(&[as_struct_geo], &[as_ranges], &[1])?;
 
     Ok(TopAS {
         inner,
@@ -497,13 +602,40 @@ fn create_pipeline(
             .binding(0)
             .descriptor_type(vk::DescriptorType::ACCELERATION_STRUCTURE_KHR)
             .descriptor_count(1)
-            .stage_flags(vk::ShaderStageFlags::RAYGEN_KHR)
+            .stage_flags(vk::ShaderStageFlags::RAYGEN_KHR | vk::ShaderStageFlags::CLOSEST_HIT_KHR)
             .build(),
         vk::DescriptorSetLayoutBinding::builder()
             .binding(1)
             .descriptor_type(vk::DescriptorType::STORAGE_IMAGE)
             .descriptor_count(1)
             .stage_flags(vk::ShaderStageFlags::RAYGEN_KHR)
+            .build(),
+        vk::DescriptorSetLayoutBinding::builder()
+            .binding(2)
+            .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
+            .descriptor_count(1)
+            .stage_flags(vk::ShaderStageFlags::RAYGEN_KHR)
+            .build(),
+        // Vertex buffer
+        vk::DescriptorSetLayoutBinding::builder()
+            .binding(3)
+            .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+            .descriptor_count(1)
+            .stage_flags(vk::ShaderStageFlags::CLOSEST_HIT_KHR)
+            .build(),
+        //Index buffer
+        vk::DescriptorSetLayoutBinding::builder()
+            .binding(4)
+            .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+            .descriptor_count(1)
+            .stage_flags(vk::ShaderStageFlags::CLOSEST_HIT_KHR)
+            .build(),
+        // Geometry info buffer
+        vk::DescriptorSetLayoutBinding::builder()
+            .binding(5)
+            .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+            .descriptor_count(1)
+            .stage_flags(vk::ShaderStageFlags::CLOSEST_HIT_KHR)
             .build(),
     ];
 
@@ -513,13 +645,15 @@ fn create_pipeline(
 
     // shader groups
     let raygen_module = context.create_shader_module(
-        &include_bytes!("../../assets/shaders/triangle/raygen.rgen.spv")[..],
+        &include_bytes!("../../assets/shaders/shadows/raygen.rgen.spv")[..],
     )?;
-    let miss_module = context.create_shader_module(
-        &include_bytes!("../../assets/shaders/triangle/miss.rmiss.spv")[..],
+    let miss_module = context
+        .create_shader_module(&include_bytes!("../../assets/shaders/shadows/miss.rmiss.spv")[..])?;
+    let shadow_miss = context.create_shader_module(
+        &include_bytes!("../../assets/shaders/shadows/shadow.rmiss.spv")[..],
     )?;
     let closesthit_module = context.create_shader_module(
-        &include_bytes!("../../assets/shaders/triangle/closesthit.rchit.spv")[..],
+        &include_bytes!("../../assets/shaders/shadows/closesthit.rchit.spv")[..],
     )?;
 
     let entry_point_name = CString::new("main").unwrap();
@@ -533,6 +667,11 @@ fn create_pipeline(
         vk::PipelineShaderStageCreateInfo::builder()
             .stage(vk::ShaderStageFlags::MISS_KHR)
             .module(miss_module.inner)
+            .name(&entry_point_name)
+            .build(),
+        vk::PipelineShaderStageCreateInfo::builder()
+            .stage(vk::ShaderStageFlags::MISS_KHR)
+            .module(shadow_miss.inner)
             .name(&entry_point_name)
             .build(),
         vk::PipelineShaderStageCreateInfo::builder()
@@ -558,9 +697,16 @@ fn create_pipeline(
             .intersection_shader(vk::SHADER_UNUSED_KHR)
             .build(),
         vk::RayTracingShaderGroupCreateInfoKHR::builder()
+            .ty(vk::RayTracingShaderGroupTypeKHR::GENERAL)
+            .general_shader(2)
+            .closest_hit_shader(vk::SHADER_UNUSED_KHR)
+            .any_hit_shader(vk::SHADER_UNUSED_KHR)
+            .intersection_shader(vk::SHADER_UNUSED_KHR)
+            .build(),
+        vk::RayTracingShaderGroupCreateInfoKHR::builder()
             .ty(vk::RayTracingShaderGroupTypeKHR::TRIANGLES_HIT_GROUP)
             .general_shader(vk::SHADER_UNUSED_KHR)
-            .closest_hit_shader(2)
+            .closest_hit_shader(3)
             .any_hit_shader(vk::SHADER_UNUSED_KHR)
             .intersection_shader(vk::SHADER_UNUSED_KHR)
             .build(),
@@ -570,7 +716,7 @@ fn create_pipeline(
     let mut pipe_info = vk::RayTracingPipelineCreateInfoKHR::builder()
         .stages(&shader_stages_infos)
         .groups(&shader_groups_infos)
-        .max_pipeline_ray_recursion_depth(1);
+        .max_pipeline_ray_recursion_depth(2);
 
     let pipe = context.create_ray_tracing_pipeline(&pipe_layout, &mut pipe_info)?;
 
@@ -580,8 +726,10 @@ fn create_pipeline(
 fn create_descriptor_sets(
     context: &VkContext,
     descriptor_set_layout: &VkDescriptorSetLayout,
+    bottom_as: &BottomAS,
     top_as: &TopAS,
     storage_imgs: &[ImageAndView],
+    ubo_buffer: &VkBuffer,
 ) -> Result<(VkDescriptorPool, VkDescriptorSets)> {
     let set_count = storage_imgs.len() as u32;
 
@@ -593,6 +741,14 @@ fn create_descriptor_sets(
         vk::DescriptorPoolSize::builder()
             .ty(vk::DescriptorType::STORAGE_IMAGE)
             .descriptor_count(set_count)
+            .build(),
+        vk::DescriptorPoolSize::builder()
+            .ty(vk::DescriptorType::UNIFORM_BUFFER)
+            .descriptor_count(set_count)
+            .build(),
+        vk::DescriptorPoolSize::builder()
+            .ty(vk::DescriptorType::STORAGE_BUFFER)
+            .descriptor_count(set_count * 3)
             .build(),
     ];
 
@@ -613,6 +769,32 @@ fn create_descriptor_sets(
             kind: VkWriteDescriptorSetKind::StorageImage {
                 layout: vk::ImageLayout::GENERAL,
                 view: &storage_imgs[index].view,
+            },
+        });
+
+        set.update(&VkWriteDescriptorSet {
+            binding: 2,
+            kind: VkWriteDescriptorSetKind::UniformBuffer { buffer: ubo_buffer },
+        });
+
+        set.update(&VkWriteDescriptorSet {
+            binding: 3,
+            kind: VkWriteDescriptorSetKind::StorageBuffer {
+                buffer: &bottom_as.vertex_buffer,
+            },
+        });
+
+        set.update(&VkWriteDescriptorSet {
+            binding: 4,
+            kind: VkWriteDescriptorSetKind::StorageBuffer {
+                buffer: &bottom_as.index_buffer,
+            },
+        });
+
+        set.update(&VkWriteDescriptorSet {
+            binding: 5,
+            kind: VkWriteDescriptorSetKind::StorageBuffer {
+                buffer: &bottom_as.geometry_info_buffer,
             },
         });
     });

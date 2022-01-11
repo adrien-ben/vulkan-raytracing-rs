@@ -13,5 +13,7 @@ ash = { version = "0.35", features = ["linked"] }
 ash-window = "0.9"
 gpu-allocator = { version = "0.15", default-features = false, features = ["vulkan"] }
 winit = "0.26"
+glam = "0.20"
 
 vulkan = { path = "../libs/vulkan" }
+gltf = { path = "../libs/gltf" }

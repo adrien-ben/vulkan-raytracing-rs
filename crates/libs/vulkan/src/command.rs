@@ -243,7 +243,7 @@ impl VkCommandBuffer {
     pub fn build_acceleration_structures(
         &self,
         as_build_geo_info: &vk::AccelerationStructureBuildGeometryInfoKHR,
-        as_build_range_info: &vk::AccelerationStructureBuildRangeInfoKHR,
+        as_build_range_info: &[vk::AccelerationStructureBuildRangeInfoKHR],
     ) {
         unsafe {
             self.ray_tracing
@@ -251,7 +251,7 @@ impl VkCommandBuffer {
                 .cmd_build_acceleration_structures(
                     self.inner,
                     std::slice::from_ref(as_build_geo_info),
-                    std::slice::from_ref(&std::slice::from_ref(as_build_range_info)),
+                    std::slice::from_ref(&as_build_range_info),
                 )
         };
     }

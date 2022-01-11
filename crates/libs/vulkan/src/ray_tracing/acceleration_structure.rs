@@ -18,13 +18,14 @@ impl VkAccelerationStructure {
         context: &VkContext,
         ray_tracing: Arc<VkRayTracingContext>,
         level: vk::AccelerationStructureTypeKHR,
-        as_geometry: &vk::AccelerationStructureGeometryKHR,
-        max_primitive_count: u32,
+        as_geometry: &[vk::AccelerationStructureGeometryKHR],
+        as_ranges: &[vk::AccelerationStructureBuildRangeInfoKHR],
+        max_primitive_counts: &[u32],
     ) -> Result<Self> {
         let build_geo_info = vk::AccelerationStructureBuildGeometryInfoKHR::builder()
             .ty(level)
             .flags(vk::BuildAccelerationStructureFlagsKHR::PREFER_FAST_TRACE)
-            .geometries(std::slice::from_ref(as_geometry));
+            .geometries(as_geometry);
 
         let build_size = unsafe {
             ray_tracing
@@ -32,7 +33,7 @@ impl VkAccelerationStructure {
                 .get_acceleration_structure_build_sizes(
                     vk::AccelerationStructureBuildTypeKHR::DEVICE,
                     &build_geo_info,
-                    &[max_primitive_count],
+                    max_primitive_counts,
                 )
         };
 
@@ -65,20 +66,14 @@ impl VkAccelerationStructure {
             .ty(level)
             .mode(vk::BuildAccelerationStructureModeKHR::BUILD)
             .flags(vk::BuildAccelerationStructureFlagsKHR::PREFER_FAST_TRACE)
-            .geometries(std::slice::from_ref(as_geometry))
+            .geometries(as_geometry)
             .dst_acceleration_structure(inner)
             .scratch_data(vk::DeviceOrHostAddressKHR {
                 device_address: scratch_buffer_address,
             });
 
-        let build_range_info = vk::AccelerationStructureBuildRangeInfoKHR::builder()
-            .first_vertex(0)
-            .primitive_count(max_primitive_count)
-            .primitive_offset(0)
-            .transform_offset(0);
-
         context.execute_one_time_commands(|cmd_buffer| {
-            cmd_buffer.build_acceleration_structures(&build_geo_info, &build_range_info);
+            cmd_buffer.build_acceleration_structures(&build_geo_info, as_ranges);
         })?;
 
         let address_info =
@@ -102,29 +97,33 @@ impl VkAccelerationStructure {
 impl VkContext {
     pub fn create_bottom_level_acceleration_structure(
         &self,
-        as_geometry: &vk::AccelerationStructureGeometryKHR,
-        max_primitive_count: u32,
+        as_geometry: &[vk::AccelerationStructureGeometryKHR],
+        as_ranges: &[vk::AccelerationStructureBuildRangeInfoKHR],
+        max_primitive_counts: &[u32],
     ) -> Result<VkAccelerationStructure> {
         VkAccelerationStructure::new(
             self,
             self.ray_tracing.clone(),
             vk::AccelerationStructureTypeKHR::BOTTOM_LEVEL,
             as_geometry,
-            max_primitive_count,
+            as_ranges,
+            max_primitive_counts,
         )
     }
 
     pub fn create_top_level_acceleration_structure(
         &self,
-        as_geometry: &vk::AccelerationStructureGeometryKHR,
-        max_primitive_count: u32,
+        as_geometry: &[vk::AccelerationStructureGeometryKHR],
+        as_ranges: &[vk::AccelerationStructureBuildRangeInfoKHR],
+        max_primitive_counts: &[u32],
     ) -> Result<VkAccelerationStructure> {
         VkAccelerationStructure::new(
             self,
             self.ray_tracing.clone(),
             vk::AccelerationStructureTypeKHR::TOP_LEVEL,
             as_geometry,
-            max_primitive_count,
+            as_ranges,
+            max_primitive_counts,
         )
     }
 }

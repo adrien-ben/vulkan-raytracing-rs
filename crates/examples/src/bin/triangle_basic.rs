@@ -1191,19 +1191,19 @@ fn create_pipeline(
 
     // shader groups
     let raygen_source = read_shader_from_bytes(
-        &include_bytes!("../../../../assets/shaders/triangle/raygen.rgen.spv")[..],
+        &include_bytes!("../../assets/shaders/triangle/raygen.rgen.spv")[..],
     )?;
     let raygen_create_info = vk::ShaderModuleCreateInfo::builder().code(&raygen_source);
     let raygen_module = unsafe { device.create_shader_module(&raygen_create_info, None)? };
 
     let miss_source = read_shader_from_bytes(
-        &include_bytes!("../../../../assets/shaders/triangle/miss.rmiss.spv")[..],
+        &include_bytes!("../../assets/shaders/triangle/miss.rmiss.spv")[..],
     )?;
     let miss_create_info = vk::ShaderModuleCreateInfo::builder().code(&miss_source);
     let miss_module = unsafe { device.create_shader_module(&miss_create_info, None)? };
 
     let closesthit_source = read_shader_from_bytes(
-        &include_bytes!("../../../../assets/shaders/triangle/closesthit.rchit.spv")[..],
+        &include_bytes!("../../assets/shaders/triangle/closesthit.rchit.spv")[..],
     )?;
     let closesthit_create_info = vk::ShaderModuleCreateInfo::builder().code(&closesthit_source);
     let closesthit_module = unsafe { device.create_shader_module(&closesthit_create_info, None)? };
