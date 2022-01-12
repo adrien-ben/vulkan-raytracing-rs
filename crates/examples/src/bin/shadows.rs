@@ -1,7 +1,7 @@
 use anyhow::Result;
 use ash::vk::{self, Packed24_8};
 use glam::{vec3, Mat4};
-use gltf::Vertex;
+use gltf::{Material, Vertex};
 use gpu_allocator::MemoryLocation;
 use simple_logger::SimpleLogger;
 use std::{
@@ -21,6 +21,8 @@ const WIDTH: u32 = 1024;
 const HEIGHT: u32 = 576;
 const IN_FLIGHT_FRAMES: u32 = 2;
 const APP_NAME: &str = "Shadows";
+
+const EYE_POS: [f32; 3] = [-1.0, 1.5, 3.0];
 
 fn main() -> Result<()> {
     SimpleLogger::default().env().init()?;
@@ -123,6 +125,7 @@ pub struct CameraUBO {
 #[repr(C)]
 pub struct GeometryInfo {
     transform: Mat4,
+    material: Material,
     vertex_offset: u32,
     index_offset: u32,
 }
@@ -353,11 +356,7 @@ impl Drop for App {
 }
 
 fn create_ubo_buffer(context: &VkContext) -> Result<VkBuffer> {
-    let view = Mat4::look_at_rh(
-        vec3(-1.0, 1.5, 3.0),
-        vec3(0.0, 1.0, 0.0),
-        vec3(0.0, 1.0, 0.0),
-    );
+    let view = Mat4::look_at_rh(EYE_POS.into(), vec3(0.0, 1.0, 0.0), vec3(0.0, 1.0, 0.0));
     let inverted_view = view.inverse();
 
     let proj = Mat4::perspective_infinite_rh(60f32.to_radians(), WIDTH as f32 / HEIGHT as f32, 0.1);
@@ -458,6 +457,7 @@ fn create_bottom_as(context: &mut VkContext) -> Result<BottomAS> {
 
         geometry_infos.push(GeometryInfo {
             transform: Mat4::from_cols_array_2d(&node.transform),
+            material: mesh.material,
             vertex_offset: mesh.vertex_offset,
             index_offset: mesh.index_offset,
         });

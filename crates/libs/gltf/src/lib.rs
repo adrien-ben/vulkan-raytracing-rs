@@ -18,11 +18,17 @@ pub struct Node {
 }
 
 #[derive(Debug, Clone, Copy)]
+pub struct Material {
+    pub base_color: [f32; 4],
+}
+
+#[derive(Debug, Clone, Copy)]
 pub struct Mesh {
     pub vertex_offset: u32,
     pub vertex_count: u32,
     pub index_offset: u32,
     pub index_count: u32,
+    pub material: Material,
 }
 
 #[repr(C)]
@@ -30,6 +36,7 @@ pub struct Mesh {
 pub struct Vertex {
     pub position: Vec4,
     pub normal: Vec4,
+    pub color: Vec4,
 }
 
 pub fn load_file<P: AsRef<Path>>(path: P) -> Result<Model> {
@@ -60,6 +67,10 @@ pub fn load_file<P: AsRef<Path>>(path: P) -> Result<Model> {
                     .map(|n| vec4(n[0], n[1], n[2], 0.0))
                     .collect::<Vec<_>>();
 
+                let colors = reader
+                    .read_colors(0)
+                    .map(|reader| reader.into_rgba_f32().map(Vec4::from).collect::<Vec<_>>());
+
                 reader
                     .read_positions()
                     .unwrap()
@@ -67,8 +78,13 @@ pub fn load_file<P: AsRef<Path>>(path: P) -> Result<Model> {
                     .for_each(|(index, p)| {
                         let position = vec4(p[0], p[1], p[2], 0.0);
                         let normal = normals[index];
+                        let color = colors.as_ref().map_or(Vec4::ONE, |colors| colors[index]);
 
-                        vertices.push(Vertex { position, normal });
+                        vertices.push(Vertex {
+                            position,
+                            normal,
+                            color,
+                        });
                     });
 
                 let index_reader = reader.read_indices().unwrap().into_u32();
@@ -81,6 +97,11 @@ pub fn load_file<P: AsRef<Path>>(path: P) -> Result<Model> {
                     .into_u32()
                     .for_each(|i| indices.push(i));
 
+                let material = primitive.material();
+                let material = Material {
+                    base_color: material.pbr_metallic_roughness().base_color_factor(),
+                };
+
                 let mesh_index = meshes.len();
 
                 mesh_index_redirect.insert(og_index, mesh_index);
@@ -90,6 +111,7 @@ pub fn load_file<P: AsRef<Path>>(path: P) -> Result<Model> {
                     vertex_count,
                     index_offset,
                     index_count,
+                    material,
                 });
             }
         }

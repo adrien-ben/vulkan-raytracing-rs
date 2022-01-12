@@ -9,10 +9,16 @@ hitAttributeEXT vec2 attribs;
 struct Vertex {
     vec3 pos;
     vec3 normal;
+    vec3 color;
+};
+
+struct Material {
+    vec4 baseColor;
 };
 
 struct GeometryInfo {
     mat4 transform;
+    Material material;
     uint vertexOffset;
     uint indexOffset;
 };
@@ -42,12 +48,18 @@ void main() {
 	vec3 normal = normalize(v0.normal * barycentricCoords.x + v1.normal * barycentricCoords.y + v2.normal * barycentricCoords.z);
     normal = normalize(geometryInfo.transform * vec4(normal, 0.0)).xyz;
 
+    // Interpolate Color
+    vec3 vertexColor = normalize(v0.color * barycentricCoords.x + v1.color * barycentricCoords.y + v2.color * barycentricCoords.z);
+    vec3 baseColor = geometryInfo.material.baseColor.xyz;
+    vec3 color = vertexColor * baseColor;
+
+
     // Lighting
     const vec3 lightColor = vec3(1.0);
     const vec3 lightDir = normalize(vec3(-2.0, -3.0, -2.0));
     float dot_prod = dot(-lightDir, normal);
     float factor = max(0.2, dot_prod);
-    vec3 finalColor = factor * lightColor;
+    vec3 finalColor = factor * color * lightColor;
 
     hitValue = finalColor;
 
