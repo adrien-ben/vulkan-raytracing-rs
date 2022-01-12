@@ -58,18 +58,19 @@ void main() {
     const vec3 lightColor = vec3(1.0);
     const vec3 lightDir = normalize(vec3(-2.0, -3.0, -2.0));
     float dot_prod = dot(-lightDir, normal);
-    float factor = max(0.2, dot_prod);
+    float factor = max(0.3, dot_prod);
     vec3 finalColor = factor * color * lightColor;
 
     hitValue = finalColor;
 
-    if (dot_prod > 0) {
+    isShadowed = true;
+
+    if (dot_prod >= 0) {
         // Shadow casting
         float tmin = 0.001;
         float tmax = 10.0;
         vec3 origin = gl_WorldRayOriginEXT + gl_WorldRayDirectionEXT * gl_HitTEXT;
-        isShadowed = true;
-
+        
         // Trace shadow ray and offset indices to match shadow hit/miss shader group indices
         const uint missIndex = 1;
 
@@ -85,9 +86,9 @@ void main() {
             tmax, 
             1
         );
+    }
 
-        if (isShadowed) {
-            hitValue *= 0.3;
-        }
+    if (isShadowed) {
+        hitValue *= 0.3;
     }
 }
