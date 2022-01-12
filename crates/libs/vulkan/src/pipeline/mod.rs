@@ -22,10 +22,14 @@ pub struct VkPipeline {
 impl VkPipelineLayout {
     pub(crate) fn new(
         device: Arc<VkDevice>,
-        descriptor_set_layout: &VkDescriptorSetLayout,
+        descriptor_set_layouts: &[&VkDescriptorSetLayout],
     ) -> Result<Self> {
-        let pipe_layout_info = vk::PipelineLayoutCreateInfo::builder()
-            .set_layouts(std::slice::from_ref(&descriptor_set_layout.inner));
+        let layouts = descriptor_set_layouts
+            .iter()
+            .map(|l| l.inner)
+            .collect::<Vec<_>>();
+
+        let pipe_layout_info = vk::PipelineLayoutCreateInfo::builder().set_layouts(&layouts);
         let inner = unsafe {
             device
                 .inner
@@ -61,9 +65,9 @@ impl VkPipeline {
 impl VkContext {
     pub fn create_pipeline_layout(
         &self,
-        descriptor_set_layout: &VkDescriptorSetLayout,
+        descriptor_set_layouts: &[&VkDescriptorSetLayout],
     ) -> Result<VkPipelineLayout> {
-        VkPipelineLayout::new(self.device.clone(), descriptor_set_layout)
+        VkPipelineLayout::new(self.device.clone(), descriptor_set_layouts)
     }
 
     pub fn create_ray_tracing_pipeline(

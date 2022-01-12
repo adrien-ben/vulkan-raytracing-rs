@@ -138,6 +138,7 @@ impl VkCommandBuffer {
         &self,
         bind_point: vk::PipelineBindPoint,
         layout: &VkPipelineLayout,
+        first_set: u32,
         set: &VkDescriptorSet,
     ) {
         unsafe {
@@ -145,7 +146,7 @@ impl VkCommandBuffer {
                 self.inner,
                 bind_point,
                 layout.inner,
-                0,
+                first_set,
                 &[set.inner],
                 &[],
             )

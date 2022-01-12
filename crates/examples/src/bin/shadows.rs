@@ -99,6 +99,19 @@ struct ImageAndView {
     image: VkImage,
 }
 
+struct PipelineRes {
+    pipeline: VkPipeline,
+    pipeline_layout: VkPipelineLayout,
+    static_dsl: VkDescriptorSetLayout,
+    dynamic_dsl: VkDescriptorSetLayout,
+}
+
+struct DescriptorRes {
+    _pool: VkDescriptorPool,
+    static_sets: VkDescriptorSets,
+    dynamic_sets: VkDescriptorSets,
+}
+
 #[derive(Debug, Clone, Copy)]
 #[repr(C)]
 pub struct CameraUBO {
@@ -117,15 +130,12 @@ pub struct GeometryInfo {
 struct App {
     swapchain: VkSwapchain,
     command_pool: VkCommandPool,
-    _descriptor_set_layout: VkDescriptorSetLayout,
-    pipeline_layout: VkPipelineLayout,
-    pipeline: VkPipeline,
+    pipeline_res: PipelineRes,
     _ubo_buffer: VkBuffer,
     _bottom_as: BottomAS,
     _top_as: TopAS,
     storage_images: Vec<ImageAndView>,
-    _descriptor_pool: VkDescriptorPool,
-    descriptor_sets: VkDescriptorSets,
+    descriptor_res: DescriptorRes,
     sbt: VkShaderBindingTable,
     command_buffers: Vec<VkCommandBuffer>,
     in_flight_frames: InFlightFrames,
@@ -174,11 +184,11 @@ impl App {
         )?;
 
         // RT pipeline
-        let (descriptor_set_layout, pipeline_layout, pipeline) = create_pipeline(&context)?;
+        let pipeline_res = create_pipeline(&context)?;
 
         // Shader Binding Table (SBT)
         let sbt = context.create_shader_binding_table(
-            &pipeline,
+            &pipeline_res.pipeline,
             VkShaderBindingTableDesc {
                 group_count: 4,
                 raygen_shader_count: 1,
@@ -188,9 +198,9 @@ impl App {
         )?;
 
         // RT Descriptor sets
-        let (descriptor_pool, descriptor_sets) = create_descriptor_sets(
+        let descriptor_res = create_descriptor_sets(
             &context,
-            &descriptor_set_layout,
+            &pipeline_res,
             &bottom_as,
             &top_as,
             &storage_images,
@@ -202,9 +212,8 @@ impl App {
             &command_pool,
             &swapchain,
             &sbt,
-            &pipeline_layout,
-            &pipeline,
-            &descriptor_sets,
+            &pipeline_res,
+            &descriptor_res,
             &storage_images,
         )?;
 
@@ -215,15 +224,12 @@ impl App {
             context,
             command_pool,
             swapchain,
-            _descriptor_set_layout: descriptor_set_layout,
-            pipeline_layout,
-            pipeline,
+            pipeline_res,
             _ubo_buffer: ubo_buffer,
             _bottom_as: bottom_as,
             _top_as: top_as,
             storage_images,
-            _descriptor_pool: descriptor_pool,
-            descriptor_sets,
+            descriptor_res,
             sbt,
             command_buffers,
             in_flight_frames,
@@ -248,7 +254,7 @@ impl App {
         )?;
 
         storage_images.iter().enumerate().for_each(|(index, img)| {
-            let set = &self.descriptor_sets.sets[index];
+            let set = &self.descriptor_res.dynamic_sets.sets[index];
             let img_write_set = VkWriteDescriptorSet {
                 binding: 1,
                 kind: VkWriteDescriptorSetKind::StorageImage {
@@ -267,9 +273,8 @@ impl App {
             &self.command_pool,
             &self.swapchain,
             &self.sbt,
-            &self.pipeline_layout,
-            &self.pipeline,
-            &self.descriptor_sets,
+            &self.pipeline_res,
+            &self.descriptor_res,
             &self.storage_images,
         )?;
 
@@ -593,22 +598,14 @@ fn create_storage_images(
     Ok(images)
 }
 
-fn create_pipeline(
-    context: &VkContext,
-) -> Result<(VkDescriptorSetLayout, VkPipelineLayout, VkPipeline)> {
+fn create_pipeline(context: &VkContext) -> Result<PipelineRes> {
     // descriptor and pipeline layouts
-    let as_layout_bindings = [
+    let static_layout_bindings = [
         vk::DescriptorSetLayoutBinding::builder()
             .binding(0)
             .descriptor_type(vk::DescriptorType::ACCELERATION_STRUCTURE_KHR)
             .descriptor_count(1)
             .stage_flags(vk::ShaderStageFlags::RAYGEN_KHR | vk::ShaderStageFlags::CLOSEST_HIT_KHR)
-            .build(),
-        vk::DescriptorSetLayoutBinding::builder()
-            .binding(1)
-            .descriptor_type(vk::DescriptorType::STORAGE_IMAGE)
-            .descriptor_count(1)
-            .stage_flags(vk::ShaderStageFlags::RAYGEN_KHR)
             .build(),
         vk::DescriptorSetLayoutBinding::builder()
             .binding(2)
@@ -639,9 +636,18 @@ fn create_pipeline(
             .build(),
     ];
 
-    let dsl = context.create_descriptor_set_layout(&as_layout_bindings)?;
+    let dynamic_layout_bindings = [vk::DescriptorSetLayoutBinding::builder()
+        .binding(1)
+        .descriptor_type(vk::DescriptorType::STORAGE_IMAGE)
+        .descriptor_count(1)
+        .stage_flags(vk::ShaderStageFlags::RAYGEN_KHR)
+        .build()];
 
-    let pipe_layout = context.create_pipeline_layout(&dsl)?;
+    let static_dsl = context.create_descriptor_set_layout(&static_layout_bindings)?;
+    let dynamic_dsl = context.create_descriptor_set_layout(&dynamic_layout_bindings)?;
+    let dsls = [&static_dsl, &dynamic_dsl];
+
+    let pipeline_layout = context.create_pipeline_layout(&dsls)?;
 
     // shader groups
     let raygen_module = context.create_shader_module(
@@ -718,25 +724,30 @@ fn create_pipeline(
         .groups(&shader_groups_infos)
         .max_pipeline_ray_recursion_depth(2);
 
-    let pipe = context.create_ray_tracing_pipeline(&pipe_layout, &mut pipe_info)?;
+    let pipeline = context.create_ray_tracing_pipeline(&pipeline_layout, &mut pipe_info)?;
 
-    Ok((dsl, pipe_layout, pipe))
+    Ok(PipelineRes {
+        pipeline,
+        pipeline_layout,
+        static_dsl,
+        dynamic_dsl,
+    })
 }
 
 fn create_descriptor_sets(
     context: &VkContext,
-    descriptor_set_layout: &VkDescriptorSetLayout,
+    pipeline_res: &PipelineRes,
     bottom_as: &BottomAS,
     top_as: &TopAS,
     storage_imgs: &[ImageAndView],
     ubo_buffer: &VkBuffer,
-) -> Result<(VkDescriptorPool, VkDescriptorSets)> {
+) -> Result<DescriptorRes> {
     let set_count = storage_imgs.len() as u32;
 
     let pool_sizes = [
         vk::DescriptorPoolSize::builder()
             .ty(vk::DescriptorType::ACCELERATION_STRUCTURE_KHR)
-            .descriptor_count(set_count as _)
+            .descriptor_count(1)
             .build(),
         vk::DescriptorPoolSize::builder()
             .ty(vk::DescriptorType::STORAGE_IMAGE)
@@ -744,31 +755,24 @@ fn create_descriptor_sets(
             .build(),
         vk::DescriptorPoolSize::builder()
             .ty(vk::DescriptorType::UNIFORM_BUFFER)
-            .descriptor_count(set_count)
+            .descriptor_count(1)
             .build(),
         vk::DescriptorPoolSize::builder()
             .ty(vk::DescriptorType::STORAGE_BUFFER)
-            .descriptor_count(set_count * 3)
+            .descriptor_count(3)
             .build(),
     ];
 
-    let pool = context.create_descriptor_pool(set_count as _, &pool_sizes)?;
+    let pool = context.create_descriptor_pool(set_count + 1, &pool_sizes)?;
 
-    let sets = pool.allocate_sets(descriptor_set_layout, set_count)?;
+    let static_sets = pool.allocate_sets(&pipeline_res.static_dsl, 1)?;
+    let dynamic_sets = pool.allocate_sets(&pipeline_res.dynamic_dsl, set_count)?;
 
-    sets.iter().enumerate().for_each(|(index, set)| {
+    static_sets.iter().for_each(|set| {
         set.update(&VkWriteDescriptorSet {
             binding: 0,
             kind: VkWriteDescriptorSetKind::AccelerationStructure {
                 acceleration_structure: &top_as.inner,
-            },
-        });
-
-        set.update(&VkWriteDescriptorSet {
-            binding: 1,
-            kind: VkWriteDescriptorSetKind::StorageImage {
-                layout: vk::ImageLayout::GENERAL,
-                view: &storage_imgs[index].view,
             },
         });
 
@@ -799,35 +803,61 @@ fn create_descriptor_sets(
         });
     });
 
-    Ok((pool, sets))
+    dynamic_sets.iter().enumerate().for_each(|(index, set)| {
+        set.update(&VkWriteDescriptorSet {
+            binding: 1,
+            kind: VkWriteDescriptorSetKind::StorageImage {
+                layout: vk::ImageLayout::GENERAL,
+                view: &storage_imgs[index].view,
+            },
+        });
+    });
+
+    Ok(DescriptorRes {
+        _pool: pool,
+        dynamic_sets,
+        static_sets,
+    })
 }
 
 fn create_and_record_command_buffers(
     pool: &VkCommandPool,
     swapchain: &VkSwapchain,
     sbt: &VkShaderBindingTable,
-    pipeline_layout: &VkPipelineLayout,
-    pipeline: &VkPipeline,
-    descriptor_sets: &VkDescriptorSets,
+    pipeline_res: &PipelineRes,
+    descriptor_res: &DescriptorRes,
     storage_images: &[ImageAndView],
 ) -> Result<Vec<VkCommandBuffer>> {
     log::debug!("Creating and recording command buffers");
     let buffers = pool
         .allocate_command_buffers(vk::CommandBufferLevel::PRIMARY, swapchain.images.len() as _)?;
 
+    let static_set = &descriptor_res.static_sets.sets[0];
+
     for (index, buffer) in buffers.iter().enumerate() {
-        let descriptor_set = &descriptor_sets.sets[index];
+        let dynamic_set = &descriptor_res.dynamic_sets.sets[index];
         let swapchain_image = &swapchain.images[index];
         let storage_image = &storage_images[index].image;
 
         buffer.begin(vk::CommandBufferUsageFlags::SIMULTANEOUS_USE)?;
 
-        buffer.bind_pipeline(vk::PipelineBindPoint::RAY_TRACING_KHR, pipeline);
+        buffer.bind_pipeline(
+            vk::PipelineBindPoint::RAY_TRACING_KHR,
+            &pipeline_res.pipeline,
+        );
 
         buffer.bind_descriptor_set(
             vk::PipelineBindPoint::RAY_TRACING_KHR,
-            pipeline_layout,
-            descriptor_set,
+            &pipeline_res.pipeline_layout,
+            0,
+            static_set,
+        );
+
+        buffer.bind_descriptor_set(
+            vk::PipelineBindPoint::RAY_TRACING_KHR,
+            &pipeline_res.pipeline_layout,
+            1,
+            dynamic_set,
         );
 
         buffer.trace_rays(sbt, swapchain.extent.width, swapchain.extent.height);
