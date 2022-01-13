@@ -2,7 +2,7 @@ use anyhow::Result;
 use ash::vk;
 use gpu_allocator::MemoryLocation;
 
-use crate::{utils::compute_aligned_size, VkBuffer, VkContext, VkPipeline};
+use crate::{utils::compute_aligned_size, VkBuffer, VkContext, VkRTPipeline};
 
 pub struct VkShaderBindingTable {
     _buffer: VkBuffer,
@@ -11,20 +11,10 @@ pub struct VkShaderBindingTable {
     pub(crate) hit_region: vk::StridedDeviceAddressRegionKHR,
 }
 
-pub struct VkShaderBindingTableDesc {
-    pub group_count: u32,
-    pub raygen_shader_count: u32,
-    pub miss_shader_count: u32,
-    pub hit_shader_count: u32,
-}
-
 impl VkShaderBindingTable {
-    pub(crate) fn new(
-        context: &VkContext,
-        pipeline: &VkPipeline,
-        desc: VkShaderBindingTableDesc,
-    ) -> Result<Self> {
+    pub(crate) fn new(context: &VkContext, pipeline: &VkRTPipeline) -> Result<Self> {
         let ray_tracing = &context.ray_tracing;
+        let desc = pipeline.shader_group_info;
 
         // Handle size & aligment
         let handle_size = ray_tracing.pipeline_properties.shader_group_handle_size;
@@ -142,9 +132,8 @@ impl VkShaderBindingTable {
 impl VkContext {
     pub fn create_shader_binding_table(
         &self,
-        pipeline: &VkPipeline,
-        desc: VkShaderBindingTableDesc,
+        pipeline: &VkRTPipeline,
     ) -> Result<VkShaderBindingTable> {
-        VkShaderBindingTable::new(self, pipeline, desc)
+        VkShaderBindingTable::new(self, pipeline)
     }
 }

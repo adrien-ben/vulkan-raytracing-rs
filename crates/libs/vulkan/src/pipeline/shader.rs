@@ -5,9 +5,22 @@ use ash::vk;
 
 use crate::{device::VkDevice, utils::read_shader_from_bytes, VkContext};
 
+pub struct VkRTShaderCreateInfo<'a> {
+    pub source: &'a [u8],
+    pub stage: vk::ShaderStageFlags,
+    pub group: VkRTShaderGroup,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum VkRTShaderGroup {
+    RayGen,
+    Miss,
+    ClosestHit,
+}
+
 pub struct VkShaderModule {
     device: Arc<VkDevice>,
-    pub inner: vk::ShaderModule,
+    pub(crate) inner: vk::ShaderModule,
 }
 
 impl VkShaderModule {

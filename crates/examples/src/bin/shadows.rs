@@ -4,10 +4,7 @@ use glam::{vec3, Mat4};
 use gltf::{Material, Vertex};
 use gpu_allocator::MemoryLocation;
 use simple_logger::SimpleLogger;
-use std::{
-    ffi::CString,
-    mem::{size_of, size_of_val},
-};
+use std::mem::{size_of, size_of_val};
 use vulkan::utils::*;
 use vulkan::*;
 use winit::{
@@ -102,7 +99,7 @@ struct ImageAndView {
 }
 
 struct PipelineRes {
-    pipeline: VkPipeline,
+    pipeline: VkRTPipeline,
     pipeline_layout: VkPipelineLayout,
     static_dsl: VkDescriptorSetLayout,
     dynamic_dsl: VkDescriptorSetLayout,
@@ -110,8 +107,8 @@ struct PipelineRes {
 
 struct DescriptorRes {
     _pool: VkDescriptorPool,
-    static_sets: VkDescriptorSets,
-    dynamic_sets: VkDescriptorSets,
+    static_set: VkDescriptorSet,
+    dynamic_sets: Vec<VkDescriptorSet>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -190,15 +187,7 @@ impl App {
         let pipeline_res = create_pipeline(&context)?;
 
         // Shader Binding Table (SBT)
-        let sbt = context.create_shader_binding_table(
-            &pipeline_res.pipeline,
-            VkShaderBindingTableDesc {
-                group_count: 4,
-                raygen_shader_count: 1,
-                miss_shader_count: 2,
-                hit_shader_count: 1,
-            },
-        )?;
+        let sbt = context.create_shader_binding_table(&pipeline_res.pipeline)?;
 
         // RT Descriptor sets
         let descriptor_res = create_descriptor_sets(
@@ -257,7 +246,7 @@ impl App {
         )?;
 
         storage_images.iter().enumerate().for_each(|(index, img)| {
-            let set = &self.descriptor_res.dynamic_sets.sets[index];
+            let set = &self.descriptor_res.dynamic_sets[index];
             let img_write_set = VkWriteDescriptorSet {
                 binding: 1,
                 kind: VkWriteDescriptorSetKind::StorageImage {
@@ -649,82 +638,36 @@ fn create_pipeline(context: &VkContext) -> Result<PipelineRes> {
 
     let pipeline_layout = context.create_pipeline_layout(&dsls)?;
 
-    // shader groups
-    let raygen_module = context.create_shader_module(
-        &include_bytes!("../../assets/shaders/shadows/raygen.rgen.spv")[..],
-    )?;
-    let miss_module = context
-        .create_shader_module(&include_bytes!("../../assets/shaders/shadows/miss.rmiss.spv")[..])?;
-    let shadow_miss = context.create_shader_module(
-        &include_bytes!("../../assets/shaders/shadows/shadow.rmiss.spv")[..],
-    )?;
-    let closesthit_module = context.create_shader_module(
-        &include_bytes!("../../assets/shaders/shadows/closesthit.rchit.spv")[..],
-    )?;
-
-    let entry_point_name = CString::new("main").unwrap();
-
-    let shader_stages_infos = [
-        vk::PipelineShaderStageCreateInfo::builder()
-            .stage(vk::ShaderStageFlags::RAYGEN_KHR)
-            .module(raygen_module.inner)
-            .name(&entry_point_name)
-            .build(),
-        vk::PipelineShaderStageCreateInfo::builder()
-            .stage(vk::ShaderStageFlags::MISS_KHR)
-            .module(miss_module.inner)
-            .name(&entry_point_name)
-            .build(),
-        vk::PipelineShaderStageCreateInfo::builder()
-            .stage(vk::ShaderStageFlags::MISS_KHR)
-            .module(shadow_miss.inner)
-            .name(&entry_point_name)
-            .build(),
-        vk::PipelineShaderStageCreateInfo::builder()
-            .stage(vk::ShaderStageFlags::CLOSEST_HIT_KHR)
-            .module(closesthit_module.inner)
-            .name(&entry_point_name)
-            .build(),
+    // Shaders
+    let shaders_create_info = [
+        VkRTShaderCreateInfo {
+            source: &include_bytes!("../../assets/shaders/shadows/raygen.rgen.spv")[..],
+            stage: vk::ShaderStageFlags::RAYGEN_KHR,
+            group: VkRTShaderGroup::RayGen,
+        },
+        VkRTShaderCreateInfo {
+            source: &include_bytes!("../../assets/shaders/shadows/miss.rmiss.spv")[..],
+            stage: vk::ShaderStageFlags::MISS_KHR,
+            group: VkRTShaderGroup::Miss,
+        },
+        VkRTShaderCreateInfo {
+            source: &include_bytes!("../../assets/shaders/shadows/shadow.rmiss.spv")[..],
+            stage: vk::ShaderStageFlags::MISS_KHR,
+            group: VkRTShaderGroup::Miss,
+        },
+        VkRTShaderCreateInfo {
+            source: &include_bytes!("../../assets/shaders/shadows/closesthit.rchit.spv")[..],
+            stage: vk::ShaderStageFlags::CLOSEST_HIT_KHR,
+            group: VkRTShaderGroup::ClosestHit,
+        },
     ];
 
-    let shader_groups_infos = [
-        vk::RayTracingShaderGroupCreateInfoKHR::builder()
-            .ty(vk::RayTracingShaderGroupTypeKHR::GENERAL)
-            .general_shader(0)
-            .closest_hit_shader(vk::SHADER_UNUSED_KHR)
-            .any_hit_shader(vk::SHADER_UNUSED_KHR)
-            .intersection_shader(vk::SHADER_UNUSED_KHR)
-            .build(),
-        vk::RayTracingShaderGroupCreateInfoKHR::builder()
-            .ty(vk::RayTracingShaderGroupTypeKHR::GENERAL)
-            .general_shader(1)
-            .closest_hit_shader(vk::SHADER_UNUSED_KHR)
-            .any_hit_shader(vk::SHADER_UNUSED_KHR)
-            .intersection_shader(vk::SHADER_UNUSED_KHR)
-            .build(),
-        vk::RayTracingShaderGroupCreateInfoKHR::builder()
-            .ty(vk::RayTracingShaderGroupTypeKHR::GENERAL)
-            .general_shader(2)
-            .closest_hit_shader(vk::SHADER_UNUSED_KHR)
-            .any_hit_shader(vk::SHADER_UNUSED_KHR)
-            .intersection_shader(vk::SHADER_UNUSED_KHR)
-            .build(),
-        vk::RayTracingShaderGroupCreateInfoKHR::builder()
-            .ty(vk::RayTracingShaderGroupTypeKHR::TRIANGLES_HIT_GROUP)
-            .general_shader(vk::SHADER_UNUSED_KHR)
-            .closest_hit_shader(3)
-            .any_hit_shader(vk::SHADER_UNUSED_KHR)
-            .intersection_shader(vk::SHADER_UNUSED_KHR)
-            .build(),
-    ];
+    let pipeline_create_info = VkRTPipelineCreateInfo {
+        shaders: &shaders_create_info,
+        max_ray_recursion_depth: 2,
+    };
 
-    // TODO: abstract
-    let mut pipe_info = vk::RayTracingPipelineCreateInfoKHR::builder()
-        .stages(&shader_stages_infos)
-        .groups(&shader_groups_infos)
-        .max_pipeline_ray_recursion_depth(2);
-
-    let pipeline = context.create_ray_tracing_pipeline(&pipeline_layout, &mut pipe_info)?;
+    let pipeline = context.create_ray_tracing_pipeline(&pipeline_layout, &pipeline_create_info)?;
 
     Ok(PipelineRes {
         pipeline,
@@ -765,42 +708,40 @@ fn create_descriptor_sets(
 
     let pool = context.create_descriptor_pool(set_count + 1, &pool_sizes)?;
 
-    let static_sets = pool.allocate_sets(&pipeline_res.static_dsl, 1)?;
+    let static_set = pool.allocate_set(&pipeline_res.static_dsl)?;
     let dynamic_sets = pool.allocate_sets(&pipeline_res.dynamic_dsl, set_count)?;
 
-    static_sets.iter().for_each(|set| {
-        set.update(&VkWriteDescriptorSet {
-            binding: 0,
-            kind: VkWriteDescriptorSetKind::AccelerationStructure {
-                acceleration_structure: &top_as.inner,
-            },
-        });
+    static_set.update(&VkWriteDescriptorSet {
+        binding: 0,
+        kind: VkWriteDescriptorSetKind::AccelerationStructure {
+            acceleration_structure: &top_as.inner,
+        },
+    });
 
-        set.update(&VkWriteDescriptorSet {
-            binding: 2,
-            kind: VkWriteDescriptorSetKind::UniformBuffer { buffer: ubo_buffer },
-        });
+    static_set.update(&VkWriteDescriptorSet {
+        binding: 2,
+        kind: VkWriteDescriptorSetKind::UniformBuffer { buffer: ubo_buffer },
+    });
 
-        set.update(&VkWriteDescriptorSet {
-            binding: 3,
-            kind: VkWriteDescriptorSetKind::StorageBuffer {
-                buffer: &bottom_as.vertex_buffer,
-            },
-        });
+    static_set.update(&VkWriteDescriptorSet {
+        binding: 3,
+        kind: VkWriteDescriptorSetKind::StorageBuffer {
+            buffer: &bottom_as.vertex_buffer,
+        },
+    });
 
-        set.update(&VkWriteDescriptorSet {
-            binding: 4,
-            kind: VkWriteDescriptorSetKind::StorageBuffer {
-                buffer: &bottom_as.index_buffer,
-            },
-        });
+    static_set.update(&VkWriteDescriptorSet {
+        binding: 4,
+        kind: VkWriteDescriptorSetKind::StorageBuffer {
+            buffer: &bottom_as.index_buffer,
+        },
+    });
 
-        set.update(&VkWriteDescriptorSet {
-            binding: 5,
-            kind: VkWriteDescriptorSetKind::StorageBuffer {
-                buffer: &bottom_as.geometry_info_buffer,
-            },
-        });
+    static_set.update(&VkWriteDescriptorSet {
+        binding: 5,
+        kind: VkWriteDescriptorSetKind::StorageBuffer {
+            buffer: &bottom_as.geometry_info_buffer,
+        },
     });
 
     dynamic_sets.iter().enumerate().for_each(|(index, set)| {
@@ -816,7 +757,7 @@ fn create_descriptor_sets(
     Ok(DescriptorRes {
         _pool: pool,
         dynamic_sets,
-        static_sets,
+        static_set,
     })
 }
 
@@ -832,10 +773,10 @@ fn create_and_record_command_buffers(
     let buffers = pool
         .allocate_command_buffers(vk::CommandBufferLevel::PRIMARY, swapchain.images.len() as _)?;
 
-    let static_set = &descriptor_res.static_sets.sets[0];
+    let static_set = &descriptor_res.static_set;
 
     for (index, buffer) in buffers.iter().enumerate() {
-        let dynamic_set = &descriptor_res.dynamic_sets.sets[index];
+        let dynamic_set = &descriptor_res.dynamic_sets[index];
         let swapchain_image = &swapchain.images[index];
         let storage_image = &storage_images[index].image;
 
@@ -846,18 +787,11 @@ fn create_and_record_command_buffers(
             &pipeline_res.pipeline,
         );
 
-        buffer.bind_descriptor_set(
+        buffer.bind_descriptor_sets(
             vk::PipelineBindPoint::RAY_TRACING_KHR,
             &pipeline_res.pipeline_layout,
             0,
-            static_set,
-        );
-
-        buffer.bind_descriptor_set(
-            vk::PipelineBindPoint::RAY_TRACING_KHR,
-            &pipeline_res.pipeline_layout,
-            1,
-            dynamic_set,
+            &[static_set, dynamic_set],
         );
 
         buffer.trace_rays(sbt, swapchain.extent.width, swapchain.extent.height);

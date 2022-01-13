@@ -55,7 +55,7 @@ impl VkDescriptorPool {
         &self,
         layout: &VkDescriptorSetLayout,
         count: u32,
-    ) -> Result<VkDescriptorSets> {
+    ) -> Result<Vec<VkDescriptorSet>> {
         let layouts = (0..count).map(|_| layout.inner).collect::<Vec<_>>();
         let sets_alloc_info = vk::DescriptorSetAllocateInfo::builder()
             .descriptor_pool(self.inner)
@@ -73,7 +73,11 @@ impl VkDescriptorPool {
             })
             .collect::<Vec<_>>();
 
-        Ok(VkDescriptorSets { sets })
+        Ok(sets)
+    }
+
+    pub fn allocate_set(&self, layout: &VkDescriptorSetLayout) -> Result<VkDescriptorSet> {
+        Ok(self.allocate_sets(layout, 1)?.into_iter().next().unwrap())
     }
 }
 
@@ -171,16 +175,6 @@ fn update_buffer_descriptor_sets(
             .inner
             .update_descriptor_sets(std::slice::from_ref(&write), &[])
     };
-}
-
-pub struct VkDescriptorSets {
-    pub sets: Vec<VkDescriptorSet>,
-}
-
-impl VkDescriptorSets {
-    pub fn iter(&self) -> std::slice::Iter<VkDescriptorSet> {
-        self.sets.iter()
-    }
 }
 
 impl VkContext {

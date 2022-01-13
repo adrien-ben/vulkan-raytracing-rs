@@ -4,8 +4,8 @@ use anyhow::Result;
 use ash::vk;
 
 use crate::{
-    device::VkDevice, VkBuffer, VkContext, VkDescriptorSet, VkImage, VkPipeline, VkPipelineLayout,
-    VkQueueFamily, VkRayTracingContext, VkShaderBindingTable,
+    device::VkDevice, VkBuffer, VkContext, VkDescriptorSet, VkImage, VkPipelineLayout,
+    VkQueueFamily, VkRTPipeline, VkRayTracingContext, VkShaderBindingTable,
 };
 
 pub struct VkCommandPool {
@@ -126,7 +126,7 @@ impl VkCommandBuffer {
         Ok(())
     }
 
-    pub fn bind_pipeline(&self, bind_point: vk::PipelineBindPoint, pipeline: &VkPipeline) {
+    pub fn bind_pipeline(&self, bind_point: vk::PipelineBindPoint, pipeline: &VkRTPipeline) {
         unsafe {
             self.device
                 .inner
@@ -134,20 +134,21 @@ impl VkCommandBuffer {
         }
     }
 
-    pub fn bind_descriptor_set(
+    pub fn bind_descriptor_sets(
         &self,
         bind_point: vk::PipelineBindPoint,
         layout: &VkPipelineLayout,
         first_set: u32,
-        set: &VkDescriptorSet,
+        sets: &[&VkDescriptorSet],
     ) {
+        let sets = sets.iter().map(|s| s.inner).collect::<Vec<_>>();
         unsafe {
             self.device.inner.cmd_bind_descriptor_sets(
                 self.inner,
                 bind_point,
                 layout.inner,
                 first_set,
-                &[set.inner],
+                &sets,
                 &[],
             )
         }
