@@ -51,12 +51,16 @@ impl VkDevice {
                 .acceleration_structure(true);
         let mut device_addr_feature =
             vk::PhysicalDeviceBufferDeviceAddressFeatures::builder().buffer_device_address(true);
+        let mut vulkan_12_features = vk::PhysicalDeviceVulkan12Features::builder()
+            .runtime_descriptor_array(true)
+            .buffer_device_address(true);
 
         let mut features = vk::PhysicalDeviceFeatures2::builder()
             .features(vk::PhysicalDeviceFeatures::default())
             .push_next(&mut device_addr_feature)
             .push_next(&mut acceleration_struct_feature)
-            .push_next(&mut ray_tracing_feature);
+            .push_next(&mut ray_tracing_feature)
+            .push_next(&mut vulkan_12_features);
 
         let device_create_info = vk::DeviceCreateInfo::builder()
             .queue_create_infos(&queue_create_infos)

@@ -1,7 +1,7 @@
 use anyhow::Result;
 use ash::vk::{self, Packed24_8};
 use glam::{vec3, Mat4};
-use gltf::{Material, Vertex};
+use gltf::Vertex;
 use gpu_allocator::MemoryLocation;
 use simple_logger::SimpleLogger;
 use std::mem::{size_of, size_of_val};
@@ -81,10 +81,19 @@ fn create_window() -> (Window, EventLoop<()>) {
     (window, events_loop)
 }
 
-struct BottomAS {
-    inner: VkAccelerationStructure,
+struct Model {
+    gltf: gltf::Model,
     vertex_buffer: VkBuffer,
     index_buffer: VkBuffer,
+    transform_buffer: VkBuffer,
+    images: Vec<VkImage>,
+    views: Vec<VkImageView>,
+    samplers: Vec<VkSampler>,
+    textures: Vec<(usize, usize)>,
+}
+
+struct BottomAS {
+    inner: VkAccelerationStructure,
     geometry_info_buffer: VkBuffer,
 }
 
@@ -122,7 +131,8 @@ pub struct CameraUBO {
 #[repr(C)]
 pub struct GeometryInfo {
     transform: Mat4,
-    material: Material,
+    base_color: [f32; 4],
+    base_color_texture_index: i32,
     vertex_offset: u32,
     index_offset: u32,
 }
@@ -132,6 +142,7 @@ struct App {
     command_pool: VkCommandPool,
     pipeline_res: PipelineRes,
     _ubo_buffer: VkBuffer,
+    _model: Model,
     _bottom_as: BottomAS,
     _top_as: TopAS,
     storage_images: Vec<ImageAndView>,
@@ -160,22 +171,18 @@ impl App {
             &required_extensions,
         )?;
 
-        // Command pool
         let command_pool = context.create_command_pool(context.graphics_queue_family, None)?;
 
-        // Swapchain
         let swapchain = VkSwapchain::new(&context, WIDTH, HEIGHT)?;
 
-        // UBO
         let ubo_buffer = create_ubo_buffer(&context)?;
 
-        // Bottom AS
-        let bottom_as = create_bottom_as(&mut context)?;
+        let model = create_model(&context)?;
 
-        // Top AS
+        let bottom_as = create_bottom_as(&mut context, &model)?;
+
         let top_as = create_top_as(&mut context, &bottom_as)?;
 
-        // Storage image
         let storage_images = create_storage_images(
             &mut context,
             swapchain.format,
@@ -183,23 +190,20 @@ impl App {
             swapchain.images.len(),
         )?;
 
-        // RT pipeline
-        let pipeline_res = create_pipeline(&context)?;
+        let pipeline_res = create_pipeline(&context, &model)?;
 
-        // Shader Binding Table (SBT)
         let sbt = context.create_shader_binding_table(&pipeline_res.pipeline)?;
 
-        // RT Descriptor sets
         let descriptor_res = create_descriptor_sets(
             &context,
             &pipeline_res,
+            &model,
             &bottom_as,
             &top_as,
             &storage_images,
             &ubo_buffer,
         )?;
 
-        // Create and record command buffers (one per swapchain frame)
         let command_buffers = create_and_record_command_buffers(
             &command_pool,
             &swapchain,
@@ -209,7 +213,6 @@ impl App {
             &storage_images,
         )?;
 
-        // Semaphore use for presentation
         let in_flight_frames = InFlightFrames::new(&context, IN_FLIGHT_FRAMES)?;
 
         Ok(Self {
@@ -218,6 +221,7 @@ impl App {
             swapchain,
             pipeline_res,
             _ubo_buffer: ubo_buffer,
+            _model: model,
             _bottom_as: bottom_as,
             _top_as: top_as,
             storage_images,
@@ -367,7 +371,7 @@ fn create_ubo_buffer(context: &VkContext) -> Result<VkBuffer> {
     Ok(ubo_buffer)
 }
 
-fn create_bottom_as(context: &mut VkContext) -> Result<BottomAS> {
+fn create_model(context: &VkContext) -> Result<Model> {
     let model = gltf::load_file("./crates/examples/assets/models/cesium_man_with_light.glb")?;
     let vertices = model.vertices.as_slice();
     let indices = model.indices.as_slice();
@@ -379,7 +383,6 @@ fn create_bottom_as(context: &mut VkContext) -> Result<BottomAS> {
             | vk::BufferUsageFlags::STORAGE_BUFFER,
         vertices,
     )?;
-    let vertex_buffer_addr = vertex_buffer.get_device_address();
 
     let index_buffer = create_gpu_only_buffer_from_data(
         context,
@@ -388,7 +391,6 @@ fn create_bottom_as(context: &mut VkContext) -> Result<BottomAS> {
             | vk::BufferUsageFlags::STORAGE_BUFFER,
         indices,
     )?;
-    let index_buffer_addr = index_buffer.get_device_address();
 
     let transforms = model
         .nodes
@@ -416,7 +418,156 @@ fn create_bottom_as(context: &mut VkContext) -> Result<BottomAS> {
             | vk::BufferUsageFlags::ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR,
         &transforms,
     )?;
-    let transform_buffer_addr = transform_buffer.get_device_address();
+
+    let mut images = vec![];
+    let mut views = vec![];
+
+    model.images.iter().try_for_each::<_, Result<_>>(|i| {
+        let width = i.width;
+        let height = i.height;
+        let pixels = i.pixels.as_slice();
+
+        let staging = context.create_buffer(
+            vk::BufferUsageFlags::TRANSFER_SRC,
+            MemoryLocation::CpuToGpu,
+            size_of_val(pixels) as _,
+        )?;
+
+        staging.copy_data_to_buffer(pixels)?;
+
+        let image = context.create_image(
+            vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED,
+            MemoryLocation::GpuOnly,
+            vk::Format::R8G8B8A8_SRGB,
+            width,
+            height,
+        )?;
+
+        context.execute_one_time_commands(|cmd| {
+            cmd.transition_layout(
+                &image,
+                vk::ImageLayout::UNDEFINED,
+                vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                vk::AccessFlags::empty(),
+                vk::AccessFlags::TRANSFER_WRITE,
+                vk::PipelineStageFlags::TOP_OF_PIPE,
+                vk::PipelineStageFlags::TRANSFER,
+            );
+
+            cmd.copy_buffer_to_image(&staging, &image, vk::ImageLayout::TRANSFER_DST_OPTIMAL);
+
+            cmd.transition_layout(
+                &image,
+                vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                vk::AccessFlags::TRANSFER_WRITE,
+                vk::AccessFlags::SHADER_READ,
+                vk::PipelineStageFlags::TRANSFER,
+                vk::PipelineStageFlags::RAY_TRACING_SHADER_KHR,
+            );
+        })?;
+
+        let view = image.create_image_view()?;
+
+        images.push(image);
+        views.push(view);
+
+        Ok(())
+    })?;
+
+    // Dummy textures
+    if images.is_empty() {
+        let image = context.create_image(
+            vk::ImageUsageFlags::SAMPLED,
+            MemoryLocation::GpuOnly,
+            vk::Format::R8G8B8A8_SRGB,
+            1,
+            1,
+        )?;
+
+        context.execute_one_time_commands(|cmd| {
+            cmd.transition_layout(
+                &image,
+                vk::ImageLayout::UNDEFINED,
+                vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                vk::AccessFlags::empty(),
+                vk::AccessFlags::SHADER_READ,
+                vk::PipelineStageFlags::TOP_OF_PIPE,
+                vk::PipelineStageFlags::RAY_TRACING_SHADER_KHR,
+            );
+        })?;
+
+        let view = image.create_image_view()?;
+
+        images.push(image);
+        views.push(view);
+    }
+
+    let mut samplers = model
+        .samplers
+        .iter()
+        .map(|s| {
+            let sampler_info = map_gltf_sampler(s);
+            context.create_sampler(&sampler_info)
+        })
+        .collect::<Result<Vec<_>>>()?;
+
+    // Dummy sampler
+    if samplers.is_empty() {
+        let sampler_info = vk::SamplerCreateInfo::builder();
+        let sampler = context.create_sampler(&sampler_info)?;
+        samplers.push(sampler);
+    }
+
+    let mut textures = model
+        .textures
+        .iter()
+        .map(|t| (t.image_index, t.sampler_index))
+        .collect::<Vec<_>>();
+
+    // Dummy texture
+    if textures.is_empty() {
+        textures.push((0, 0));
+    }
+
+    Ok(Model {
+        gltf: model,
+        vertex_buffer,
+        index_buffer,
+        transform_buffer,
+        images,
+        views,
+        samplers,
+        textures,
+    })
+}
+
+fn map_gltf_sampler<'a>(sampler: &gltf::Sampler) -> vk::SamplerCreateInfoBuilder<'a> {
+    let mag_filter = match sampler.mag_filter {
+        gltf::MagFilter::Linear => vk::Filter::LINEAR,
+        gltf::MagFilter::Nearest => vk::Filter::NEAREST,
+    };
+
+    let min_filter = match sampler.min_filter {
+        gltf::MinFilter::Linear
+        | gltf::MinFilter::LinearMipmapLinear
+        | gltf::MinFilter::LinearMipmapNearest => vk::Filter::LINEAR,
+        gltf::MinFilter::Nearest
+        | gltf::MinFilter::NearestMipmapLinear
+        | gltf::MinFilter::NearestMipmapNearest => vk::Filter::NEAREST,
+    };
+
+    vk::SamplerCreateInfo::builder()
+        .mag_filter(mag_filter)
+        .min_filter(min_filter)
+}
+
+fn create_bottom_as(context: &mut VkContext, model: &Model) -> Result<BottomAS> {
+    let vertex_buffer_addr = model.vertex_buffer.get_device_address();
+
+    let index_buffer_addr = model.index_buffer.get_device_address();
+
+    let transform_buffer_addr = model.transform_buffer.get_device_address();
 
     let as_geo_triangles_data = vk::AccelerationStructureGeometryTrianglesDataKHR::builder()
         .vertex_format(vk::Format::R32G32B32_SFLOAT)
@@ -424,7 +575,7 @@ fn create_bottom_as(context: &mut VkContext) -> Result<BottomAS> {
             device_address: vertex_buffer_addr,
         })
         .vertex_stride(size_of::<Vertex>() as _)
-        .max_vertex(vertices.len() as _)
+        .max_vertex(model.gltf.vertices.len() as _)
         .index_type(vk::IndexType::UINT32)
         .index_data(vk::DeviceOrHostAddressConstKHR {
             device_address: index_buffer_addr,
@@ -439,14 +590,18 @@ fn create_bottom_as(context: &mut VkContext) -> Result<BottomAS> {
     let mut as_ranges = vec![];
     let mut max_primitive_counts = vec![];
 
-    for (node_index, node) in model.nodes.iter().enumerate() {
+    for (node_index, node) in model.gltf.nodes.iter().enumerate() {
         let mesh = node.mesh;
 
         let primitive_count = (mesh.index_count / 3) as u32;
 
         geometry_infos.push(GeometryInfo {
             transform: Mat4::from_cols_array_2d(&node.transform),
-            material: mesh.material,
+            base_color: mesh.material.base_color,
+            base_color_texture_index: mesh
+                .material
+                .base_color_texture_index
+                .map_or(-1, |i| i as _),
             vertex_offset: mesh.vertex_offset,
             index_offset: mesh.index_offset,
         });
@@ -487,8 +642,6 @@ fn create_bottom_as(context: &mut VkContext) -> Result<BottomAS> {
 
     Ok(BottomAS {
         inner,
-        vertex_buffer,
-        index_buffer,
         geometry_info_buffer,
     })
 }
@@ -587,7 +740,7 @@ fn create_storage_images(
     Ok(images)
 }
 
-fn create_pipeline(context: &VkContext) -> Result<PipelineRes> {
+fn create_pipeline(context: &VkContext, model: &Model) -> Result<PipelineRes> {
     // descriptor and pipeline layouts
     let static_layout_bindings = [
         vk::DescriptorSetLayoutBinding::builder()
@@ -621,6 +774,13 @@ fn create_pipeline(context: &VkContext) -> Result<PipelineRes> {
             .binding(5)
             .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
             .descriptor_count(1)
+            .stage_flags(vk::ShaderStageFlags::CLOSEST_HIT_KHR)
+            .build(),
+        // Textures
+        vk::DescriptorSetLayoutBinding::builder()
+            .binding(6)
+            .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+            .descriptor_count(model.images.len() as _)
             .stage_flags(vk::ShaderStageFlags::CLOSEST_HIT_KHR)
             .build(),
     ];
@@ -680,6 +840,7 @@ fn create_pipeline(context: &VkContext) -> Result<PipelineRes> {
 fn create_descriptor_sets(
     context: &VkContext,
     pipeline_res: &PipelineRes,
+    model: &Model,
     bottom_as: &BottomAS,
     top_as: &TopAS,
     storage_imgs: &[ImageAndView],
@@ -704,6 +865,10 @@ fn create_descriptor_sets(
             .ty(vk::DescriptorType::STORAGE_BUFFER)
             .descriptor_count(3)
             .build(),
+        vk::DescriptorPoolSize::builder()
+            .ty(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+            .descriptor_count(model.images.len() as _)
+            .build(),
     ];
 
     let pool = context.create_descriptor_pool(set_count + 1, &pool_sizes)?;
@@ -726,14 +891,14 @@ fn create_descriptor_sets(
     static_set.update(&VkWriteDescriptorSet {
         binding: 3,
         kind: VkWriteDescriptorSetKind::StorageBuffer {
-            buffer: &bottom_as.vertex_buffer,
+            buffer: &model.vertex_buffer,
         },
     });
 
     static_set.update(&VkWriteDescriptorSet {
         binding: 4,
         kind: VkWriteDescriptorSetKind::StorageBuffer {
-            buffer: &bottom_as.index_buffer,
+            buffer: &model.index_buffer,
         },
     });
 
@@ -743,6 +908,20 @@ fn create_descriptor_sets(
             buffer: &bottom_as.geometry_info_buffer,
         },
     });
+
+    for (image_index, sampler_index) in model.textures.iter() {
+        let view = &model.views[*image_index];
+        let sampler = &model.samplers[*sampler_index];
+
+        static_set.update(&VkWriteDescriptorSet {
+            binding: 6,
+            kind: VkWriteDescriptorSetKind::CombinedImageSampler {
+                view,
+                sampler,
+                layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+            },
+        })
+    }
 
     dynamic_sets.iter().enumerate().for_each(|(index, set)| {
         set.update(&VkWriteDescriptorSet {

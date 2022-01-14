@@ -3,7 +3,9 @@ use std::sync::Arc;
 use anyhow::Result;
 use ash::vk;
 
-use crate::{device::VkDevice, VkAccelerationStructure, VkBuffer, VkContext, VkImageView};
+use crate::{
+    device::VkDevice, VkAccelerationStructure, VkBuffer, VkContext, VkImageView, VkSampler,
+};
 
 pub struct VkDescriptorSetLayout {
     device: Arc<VkDevice>,
@@ -150,6 +152,27 @@ impl VkDescriptorSet {
                     vk::DescriptorType::STORAGE_BUFFER,
                 );
             }
+            CombinedImageSampler {
+                view,
+                sampler,
+                layout,
+            } => {
+                let img_info = vk::DescriptorImageInfo::builder()
+                    .image_view(view.inner)
+                    .sampler(sampler.inner)
+                    .image_layout(layout);
+                let write = vk::WriteDescriptorSet::builder()
+                    .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                    .dst_binding(write.binding)
+                    .dst_set(self.inner)
+                    .image_info(std::slice::from_ref(&img_info));
+
+                unsafe {
+                    self.device
+                        .inner
+                        .update_descriptor_sets(std::slice::from_ref(&write), &[])
+                };
+            }
         }
     }
 }
@@ -211,5 +234,10 @@ pub enum VkWriteDescriptorSetKind<'a> {
     },
     StorageBuffer {
         buffer: &'a VkBuffer,
+    },
+    CombinedImageSampler {
+        view: &'a VkImageView,
+        sampler: &'a VkSampler,
+        layout: vk::ImageLayout,
     },
 }

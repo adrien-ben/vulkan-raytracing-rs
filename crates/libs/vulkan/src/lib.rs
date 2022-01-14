@@ -9,6 +9,7 @@ mod physical_device;
 mod pipeline;
 mod queue;
 mod ray_tracing;
+mod sampler;
 mod surface;
 mod swapchain;
 mod sync;
@@ -23,6 +24,7 @@ pub use image::*;
 pub use pipeline::*;
 pub use queue::*;
 pub use ray_tracing::*;
+pub use sampler::*;
 pub use swapchain::*;
 pub use sync::*;
 

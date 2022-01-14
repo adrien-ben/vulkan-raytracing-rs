@@ -242,6 +242,27 @@ impl VkCommandBuffer {
         };
     }
 
+    pub fn copy_buffer_to_image(&self, src: &VkBuffer, dst: &VkImage, layout: vk::ImageLayout) {
+        let region = vk::BufferImageCopy::builder()
+            .image_subresource(vk::ImageSubresourceLayers {
+                aspect_mask: vk::ImageAspectFlags::COLOR,
+                mip_level: 0,
+                base_array_layer: 0,
+                layer_count: 1,
+            })
+            .image_extent(dst.extent);
+
+        unsafe {
+            self.device.inner.cmd_copy_buffer_to_image(
+                self.inner,
+                src.inner,
+                dst.inner,
+                layout,
+                std::slice::from_ref(&region),
+            );
+        };
+    }
+
     pub fn build_acceleration_structures(
         &self,
         as_build_geo_info: &vk::AccelerationStructureBuildGeometryInfoKHR,

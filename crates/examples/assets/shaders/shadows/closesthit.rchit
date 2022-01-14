@@ -10,15 +10,13 @@ struct Vertex {
     vec3 pos;
     vec3 normal;
     vec3 color;
-};
-
-struct Material {
-    vec4 baseColor;
+    vec2 uvs;
 };
 
 struct GeometryInfo {
     mat4 transform;
-    Material material;
+    vec4 baseColor;
+    int baseColorTextureIndex;
     uint vertexOffset;
     uint indexOffset;
 };
@@ -27,6 +25,7 @@ layout(binding = 0, set = 0) uniform accelerationStructureEXT topLevelAS;
 layout(binding = 3, set = 0) readonly buffer Vertices { Vertex v[]; } vertices;
 layout(binding = 4, set = 0) readonly buffer Indices { uint i[]; } indices;
 layout(binding = 5, set = 0) readonly buffer GeometryInfos { GeometryInfo g[]; } geometryInfos;
+layout(binding = 6, set = 0) uniform sampler2D textures[];
 
 void main() {
     GeometryInfo geometryInfo = geometryInfos.g[gl_GeometryIndexEXT];
@@ -48,11 +47,17 @@ void main() {
 	vec3 normal = normalize(v0.normal * barycentricCoords.x + v1.normal * barycentricCoords.y + v2.normal * barycentricCoords.z);
     normal = normalize(geometryInfo.transform * vec4(normal, 0.0)).xyz;
 
+    // Interpolate UVs
+    vec2 uvs = v0.uvs * barycentricCoords.x + v1.uvs * barycentricCoords.y + v2.uvs * barycentricCoords.z;
+
     // Interpolate Color
-    vec3 vertexColor = normalize(v0.color * barycentricCoords.x + v1.color * barycentricCoords.y + v2.color * barycentricCoords.z);
-    vec3 baseColor = geometryInfo.material.baseColor.xyz;
+    vec3 vertexColor = v0.color * barycentricCoords.x + v1.color * barycentricCoords.y + v2.color * barycentricCoords.z;
+    vec3 baseColor = geometryInfo.baseColor.xyz;
     vec3 color = vertexColor * baseColor;
 
+    if (geometryInfo.baseColorTextureIndex > -1) {
+        color = color * texture(textures[geometryInfo.baseColorTextureIndex], uvs).rgb;
+    }
 
     // Lighting
     const vec3 lightColor = vec3(1.0);

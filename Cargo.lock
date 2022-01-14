@@ -393,10 +393,10 @@ checksum = "e4fa84eead97d5412b2a20aed4d66612a97a9e41e08eababdb9ae2bf88667490"
 name = "gltf"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "glam",
  "gltf 0.16.0",
  "log",
+ "thiserror",
 ]
 
 [[package]]
