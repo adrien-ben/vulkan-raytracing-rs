@@ -51,7 +51,7 @@ impl VkSwapchain {
                     .unwrap_or(&formats[0])
             }
         };
-        log::debug!("Swapchain format: {:?}", format);
+        log::debug!("Swapchain format: {format:?}");
 
         // Swapchain present mode
         let present_mode = {
@@ -71,7 +71,7 @@ impl VkSwapchain {
                 vk::PresentModeKHR::FIFO
             }
         };
-        log::debug!("Swapchain present mode: {:?}", present_mode);
+        log::debug!("Swapchain present mode: {present_mode:?}");
 
         let capabilities = unsafe {
             context
@@ -95,11 +95,11 @@ impl VkSwapchain {
                 vk::Extent2D { width, height }
             }
         };
-        log::debug!("Swapchain extent: {:?}", extent);
+        log::debug!("Swapchain extent: {extent:?}");
 
         // Swapchain image count
         let image_count = capabilities.min_image_count;
-        log::debug!("Swapchain image count: {:?}", image_count);
+        log::debug!("Swapchain image count: {image_count:?}");
 
         // Swapchain
         let families_indices = [
@@ -171,7 +171,7 @@ impl VkSwapchain {
     }
 
     pub fn resize(&mut self, context: &VkContext, width: u32, height: u32) -> Result<()> {
-        log::debug!("Resizing vulkan swapchain to {}x{}", width, height);
+        log::debug!("Resizing vulkan swapchain to {width}x{height}");
 
         self.destroy();
 
@@ -197,7 +197,7 @@ impl VkSwapchain {
                 vk::Extent2D { width, height }
             }
         };
-        log::debug!("Swapchain extent: {:?}", extent);
+        log::debug!("Swapchain extent: {extent:?}");
 
         // Swapchain image count
         let image_count = capabilities.min_image_count;

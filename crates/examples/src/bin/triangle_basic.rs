@@ -668,10 +668,10 @@ unsafe extern "system" fn vulkan_debug_callback(
 
     let message = CStr::from_ptr((*p_callback_data).p_message);
     match flag {
-        Flag::VERBOSE => log::debug!("{:?} - {:?}", typ, message),
-        Flag::INFO => log::info!("{:?} - {:?}", typ, message),
-        Flag::WARNING => log::warn!("{:?} - {:?}", typ, message),
-        _ => log::error!("{:?} - {:?}", typ, message),
+        Flag::VERBOSE => log::debug!("{typ:?} - {message:?}"),
+        Flag::INFO => log::info!("{typ:?} - {message:?}"),
+        Flag::WARNING => log::warn!("{typ:?} - {message:?}"),
+        _ => log::error!("{typ:?} - {message:?}"),
     }
     vk::FALSE
 }
@@ -762,7 +762,7 @@ fn create_vulkan_physical_device_and_get_graphics_and_present_qs_indices(
     unsafe {
         let props = instance.get_physical_device_properties(device);
         let device_name = CStr::from_ptr(props.device_name.as_ptr());
-        log::debug!("Selected physical device: {:?}", device_name);
+        log::debug!("Selected physical device: {device_name:?}");
     }
 
     Ok((device, graphics.unwrap(), present.unwrap()))
@@ -1191,19 +1191,19 @@ fn create_pipeline(
 
     // shader groups
     let raygen_source = read_shader_from_bytes(
-        &include_bytes!("../../assets/shaders/triangle/raygen.rgen.spv")[..],
+        &include_bytes!("../../assets/shaders/triangle_basic/raygen.rgen.spv")[..],
     )?;
     let raygen_create_info = vk::ShaderModuleCreateInfo::builder().code(&raygen_source);
     let raygen_module = unsafe { device.create_shader_module(&raygen_create_info, None)? };
 
     let miss_source = read_shader_from_bytes(
-        &include_bytes!("../../assets/shaders/triangle/miss.rmiss.spv")[..],
+        &include_bytes!("../../assets/shaders/triangle_basic/miss.rmiss.spv")[..],
     )?;
     let miss_create_info = vk::ShaderModuleCreateInfo::builder().code(&miss_source);
     let miss_module = unsafe { device.create_shader_module(&miss_create_info, None)? };
 
     let closesthit_source = read_shader_from_bytes(
-        &include_bytes!("../../assets/shaders/triangle/closesthit.rchit.spv")[..],
+        &include_bytes!("../../assets/shaders/triangle_basic/closesthit.rchit.spv")[..],
     )?;
     let closesthit_create_info = vk::ShaderModuleCreateInfo::builder().code(&closesthit_source);
     let closesthit_module = unsafe { device.create_shader_module(&closesthit_create_info, None)? };
@@ -1643,7 +1643,7 @@ fn create_vulkan_swapchain(
                 .unwrap_or(&formats[0])
         }
     };
-    log::debug!("Swapchain format: {:?}", format);
+    log::debug!("Swapchain format: {format:?}");
 
     // Swapchain present mode
     let present_mode = {
@@ -1658,7 +1658,7 @@ fn create_vulkan_swapchain(
             vk::PresentModeKHR::FIFO
         }
     };
-    log::debug!("Swapchain present mode: {:?}", present_mode);
+    log::debug!("Swapchain present mode: {present_mode:?}");
 
     let capabilities =
         unsafe { surface.get_physical_device_surface_capabilities(physical_device, surface_khr)? };
@@ -1675,11 +1675,11 @@ fn create_vulkan_swapchain(
             vk::Extent2D { width, height }
         }
     };
-    log::debug!("Swapchain extent: {:?}", extent);
+    log::debug!("Swapchain extent: {extent:?}");
 
     // Swapchain image count
     let image_count = capabilities.min_image_count;
-    log::debug!("Swapchain image count: {:?}", image_count);
+    log::debug!("Swapchain image count: {image_count:?}");
 
     // Swapchain
     let families_indices = [graphics_q_index, present_q_index];

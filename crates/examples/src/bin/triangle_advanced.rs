@@ -510,17 +510,18 @@ fn create_pipeline(context: &VkContext) -> Result<PipelineRes> {
     // Shaders
     let shaders_create_info = [
         VkRTShaderCreateInfo {
-            source: &include_bytes!("../../assets/shaders/triangle/raygen.rgen.spv")[..],
+            source: &include_bytes!("../../assets/shaders/triangle_advanced/raygen.rgen.spv")[..],
             stage: vk::ShaderStageFlags::RAYGEN_KHR,
             group: VkRTShaderGroup::RayGen,
         },
         VkRTShaderCreateInfo {
-            source: &include_bytes!("../../assets/shaders/triangle/miss.rmiss.spv")[..],
+            source: &include_bytes!("../../assets/shaders/triangle_advanced/miss.rmiss.spv")[..],
             stage: vk::ShaderStageFlags::MISS_KHR,
             group: VkRTShaderGroup::Miss,
         },
         VkRTShaderCreateInfo {
-            source: &include_bytes!("../../assets/shaders/triangle/closesthit.rchit.spv")[..],
+            source: &include_bytes!("../../assets/shaders/triangle_advanced/closesthit.rchit.spv")
+                [..],
             stage: vk::ShaderStageFlags::CLOSEST_HIT_KHR,
             group: VkRTShaderGroup::ClosestHit,
         },
