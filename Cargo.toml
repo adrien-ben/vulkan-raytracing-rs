@@ -2,5 +2,6 @@
 members = [
     "crates/examples",
     "crates/libs/vulkan",
-    "crates/libs/gltf"
+    "crates/libs/gltf",
+    "crates/libs/gui"
 ]

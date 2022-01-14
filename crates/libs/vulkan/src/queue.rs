@@ -44,7 +44,7 @@ impl VkQueueFamily {
 
 pub struct VkQueue {
     device: Arc<VkDevice>,
-    pub(crate) inner: vk::Queue,
+    pub inner: vk::Queue,
 }
 
 impl VkQueue {

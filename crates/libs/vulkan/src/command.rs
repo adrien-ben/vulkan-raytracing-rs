@@ -4,14 +4,15 @@ use anyhow::Result;
 use ash::vk;
 
 use crate::{
-    device::VkDevice, VkBuffer, VkContext, VkDescriptorSet, VkImage, VkPipelineLayout,
-    VkQueueFamily, VkRTPipeline, VkRayTracingContext, VkShaderBindingTable,
+    device::VkDevice, VkBuffer, VkContext, VkDescriptorSet, VkFramebuffer, VkImage,
+    VkPipelineLayout, VkQueueFamily, VkRTPipeline, VkRayTracingContext, VkRenderPass,
+    VkShaderBindingTable,
 };
 
 pub struct VkCommandPool {
     device: Arc<VkDevice>,
     ray_tracing: Arc<VkRayTracingContext>,
-    pub(crate) inner: vk::CommandPool,
+    pub inner: vk::CommandPool,
 }
 
 impl VkCommandPool {
@@ -105,7 +106,7 @@ impl Drop for VkCommandPool {
 pub struct VkCommandBuffer {
     device: Arc<VkDevice>,
     ray_tracing: Arc<VkRayTracingContext>,
-    pub(crate) inner: vk::CommandBuffer,
+    pub inner: vk::CommandBuffer,
 }
 
 impl VkCommandBuffer {
@@ -122,6 +123,16 @@ impl VkCommandBuffer {
 
     pub fn end(&self) -> Result<()> {
         unsafe { self.device.inner.end_command_buffer(self.inner)? };
+
+        Ok(())
+    }
+
+    pub fn reset(&self) -> Result<()> {
+        unsafe {
+            self.device
+                .inner
+                .reset_command_buffer(self.inner, vk::CommandBufferResetFlags::empty())?
+        };
 
         Ok(())
     }
@@ -293,5 +304,35 @@ impl VkCommandBuffer {
                 1,
             )
         };
+    }
+
+    pub fn begin_render_pass(&self, render_pass: &VkRenderPass, framebuffer: &VkFramebuffer) {
+        let render_pass_begin_info = vk::RenderPassBeginInfo::builder()
+            .render_pass(render_pass.inner)
+            .framebuffer(framebuffer.inner)
+            .render_area(vk::Rect2D {
+                offset: vk::Offset2D { x: 0, y: 0 },
+                extent: vk::Extent2D {
+                    width: framebuffer.width,
+                    height: framebuffer.height,
+                },
+            })
+            .clear_values(&[vk::ClearValue {
+                color: vk::ClearColorValue {
+                    float32: [1.0, 1.0, 1.0, 1.0],
+                },
+            }]);
+
+        unsafe {
+            self.device.inner.cmd_begin_render_pass(
+                self.inner,
+                &render_pass_begin_info,
+                vk::SubpassContents::INLINE,
+            )
+        };
+    }
+
+    pub fn end_render_pass(&self) {
+        unsafe { self.device.inner.cmd_end_render_pass(self.inner) };
     }
 }

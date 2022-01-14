@@ -3,7 +3,10 @@ use std::sync::Arc;
 use anyhow::Result;
 use ash::{extensions::khr::Swapchain, vk};
 
-use crate::{device::VkDevice, VkContext, VkImage, VkImageView, VkQueue, VkSemaphore};
+use crate::{
+    device::VkDevice, VkContext, VkFramebuffer, VkImage, VkImageView, VkQueue, VkRenderPass,
+    VkSemaphore,
+};
 
 pub struct AcquiredImage {
     pub index: u32,
@@ -303,6 +306,21 @@ impl VkSwapchain {
         let result = unsafe { self.inner.queue_present(queue.inner, &present_info)? };
 
         Ok(result)
+    }
+
+    pub fn get_framebuffers(&self, render_pass: &VkRenderPass) -> Result<Vec<VkFramebuffer>> {
+        self.views
+            .iter()
+            .map(|view| {
+                VkFramebuffer::new(
+                    self.device.clone(),
+                    render_pass,
+                    view,
+                    self.extent.width,
+                    self.extent.height,
+                )
+            })
+            .collect::<Result<Vec<_>>>()
     }
 
     fn destroy(&mut self) {

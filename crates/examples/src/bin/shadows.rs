@@ -3,8 +3,16 @@ use ash::vk::{self, Packed24_8};
 use glam::{vec3, Mat4};
 use gltf::Vertex;
 use gpu_allocator::MemoryLocation;
+use gui::{
+    imgui::{self, DrawData},
+    imgui_rs_vulkan_renderer::Renderer,
+    GuiContext,
+};
 use simple_logger::SimpleLogger;
-use std::mem::{size_of, size_of_val};
+use std::{
+    mem::{size_of, size_of_val},
+    time::Instant,
+};
 use vulkan::utils::*;
 use vulkan::*;
 use winit::{
@@ -14,24 +22,41 @@ use winit::{
     window::{Window, WindowBuilder},
 };
 
-const WIDTH: u32 = 1024;
-const HEIGHT: u32 = 576;
+const WIDTH: u32 = 1920;
+const HEIGHT: u32 = 1080;
 const IN_FLIGHT_FRAMES: u32 = 2;
 const APP_NAME: &str = "Shadows";
 
+const MODEL_PATH: &str = "./assets/models/cesium_man_with_light.glb";
 const EYE_POS: [f32; 3] = [-1.0, 1.5, 3.0];
+const EYE_TARGET: [f32; 3] = [0.0, 1.0, 0.0];
 
 fn main() -> Result<()> {
     SimpleLogger::default().env().init()?;
 
     let (window, event_loop) = create_window();
     let mut app = App::new(&window)?;
+    let mut gui_context = GuiContext::new(
+        &app.context,
+        &app.command_pool,
+        &app.render_pass,
+        &window,
+        IN_FLIGHT_FRAMES as _,
+    )?;
     let mut is_swapchain_dirty = false;
+    let mut last_frame = Instant::now();
 
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Poll;
 
+        gui_context.handle_event(&window, &event);
+
         match event {
+            Event::NewEvents(_) => {
+                let now = Instant::now();
+                gui_context.update_delta_time(now - last_frame);
+                last_frame = now;
+            }
             // On resize
             Event::WindowEvent {
                 event: WindowEvent::Resized(..),
@@ -47,12 +72,15 @@ fn main() -> Result<()> {
                     if dim.width > 0 && dim.height > 0 {
                         app.recreate_swapchain(dim.width, dim.height)
                             .expect("Failed to recreate swapchain");
+                        gui_context
+                            .set_render_pass(&app.render_pass)
+                            .expect("Failed to set gui render pass");
                     } else {
                         return;
                     }
                 }
 
-                is_swapchain_dirty = app.draw().expect("Failed to tick");
+                is_swapchain_dirty = app.draw(&window, &mut gui_context).expect("Failed to tick");
             }
             // Exit app on request to close window
             Event::WindowEvent {
@@ -120,11 +148,25 @@ struct DescriptorRes {
     dynamic_sets: Vec<VkDescriptorSet>,
 }
 
+struct Camera {
+    position: [f32; 3],
+    target: [f32; 3],
+}
+
+#[derive(Debug, Clone, Copy)]
+#[repr(C)]
+struct Light {
+    direction: [f32; 3],
+    color: [f32; 3],
+}
+
 #[derive(Debug, Clone, Copy)]
 #[repr(C)]
 pub struct CameraUBO {
     inverted_view: Mat4,
     inverted_proj: Mat4,
+    light_direction: [f32; 4],
+    light_color: [f32; 4],
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -139,9 +181,13 @@ pub struct GeometryInfo {
 
 struct App {
     swapchain: VkSwapchain,
+    render_pass: VkRenderPass,
+    framebuffers: Vec<VkFramebuffer>,
     command_pool: VkCommandPool,
     pipeline_res: PipelineRes,
-    _ubo_buffer: VkBuffer,
+    camera: Camera,
+    light: Light,
+    ubo_buffer: VkBuffer,
     _model: Model,
     _bottom_as: BottomAS,
     _top_as: TopAS,
@@ -171,11 +217,30 @@ impl App {
             &required_extensions,
         )?;
 
-        let command_pool = context.create_command_pool(context.graphics_queue_family, None)?;
+        let command_pool = context.create_command_pool(
+            context.graphics_queue_family,
+            Some(vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER),
+        )?;
 
         let swapchain = VkSwapchain::new(&context, WIDTH, HEIGHT)?;
 
-        let ubo_buffer = create_ubo_buffer(&context)?;
+        let render_pass = create_render_pass(&context, &swapchain)?;
+
+        let framebuffers = swapchain.get_framebuffers(&render_pass)?;
+
+        let camera = Camera {
+            position: EYE_POS,
+            target: EYE_TARGET,
+        };
+        let light = Light {
+            direction: [-2.0, -1.0, -2.0],
+            color: [1.0; 3],
+        };
+        let ubo_buffer = context.create_buffer(
+            vk::BufferUsageFlags::UNIFORM_BUFFER,
+            MemoryLocation::CpuToGpu,
+            size_of::<CameraUBO>() as _,
+        )?;
 
         let model = create_model(&context)?;
 
@@ -204,14 +269,7 @@ impl App {
             &ubo_buffer,
         )?;
 
-        let command_buffers = create_and_record_command_buffers(
-            &command_pool,
-            &swapchain,
-            &sbt,
-            &pipeline_res,
-            &descriptor_res,
-            &storage_images,
-        )?;
+        let command_buffers = create_command_buffers(&command_pool, &swapchain)?;
 
         let in_flight_frames = InFlightFrames::new(&context, IN_FLIGHT_FRAMES)?;
 
@@ -219,8 +277,12 @@ impl App {
             context,
             command_pool,
             swapchain,
+            render_pass,
+            framebuffers,
             pipeline_res,
-            _ubo_buffer: ubo_buffer,
+            camera,
+            light,
+            ubo_buffer,
             _model: model,
             _bottom_as: bottom_as,
             _top_as: top_as,
@@ -237,9 +299,15 @@ impl App {
 
         self.wait_for_gpu()?;
 
-        // Swapchain
-        unsafe { self.cleanup_swapchain_dependent_resources() };
+        // Swapchain and dependent resources
+        self.framebuffers.clear();
         self.swapchain.resize(&self.context, width, height)?;
+
+        let render_pass = create_render_pass(&self.context, &self.swapchain)?;
+        let _ = std::mem::replace(&mut self.render_pass, render_pass);
+
+        let framebuffers = self.swapchain.get_framebuffers(&self.render_pass)?;
+        let _ = std::mem::replace(&mut self.framebuffers, framebuffers);
 
         // Recreate storage image for RT and update descriptor set
         let storage_images = create_storage_images(
@@ -264,62 +332,79 @@ impl App {
 
         let _ = std::mem::replace(&mut self.storage_images, storage_images);
 
-        // Create and record command buffers (one per swapchain frame)
-        let command_buffers = create_and_record_command_buffers(
-            &self.command_pool,
-            &self.swapchain,
-            &self.sbt,
-            &self.pipeline_res,
-            &self.descriptor_res,
-            &self.storage_images,
-        )?;
-
-        self.command_buffers = command_buffers;
-
         Ok(())
     }
 
-    unsafe fn cleanup_swapchain_dependent_resources(&mut self) {
-        self.command_pool
-            .free_command_buffers(&self.command_buffers);
-        self.command_buffers.clear();
-    }
+    fn draw(&mut self, window: &Window, gui_context: &mut GuiContext) -> Result<bool> {
+        // Generate UI
 
-    fn draw(&mut self) -> Result<bool> {
-        let SyncObjects {
-            image_available_semaphore,
-            render_finished_semaphore,
-            fence,
-        } = self.in_flight_frames.next();
+        gui_context
+            .platform
+            .prepare_frame(gui_context.imgui.io_mut(), window)?;
+        let ui = gui_context.imgui.frame();
 
-        fence.wait(None)?;
+        imgui::Window::new("Vulkan RT")
+            .size([300.0, 200.0], imgui::Condition::FirstUseEver)
+            .build(&ui, || {
+                // Cam controls
+                ui.text_wrapped("Camera");
+                ui.separator();
+
+                ui.input_float3("position", &mut self.camera.position)
+                    .build();
+                ui.input_float3("target", &mut self.camera.target).build();
+
+                ui.text_wrapped("Light");
+                ui.separator();
+
+                ui.input_float3("direction", &mut self.light.direction)
+                    .build();
+                ui.input_float3("color", &mut self.light.color).build();
+            });
+
+        gui_context.platform.prepare_render(&ui, window);
+        let draw_data = ui.render();
 
         // Drawing the frame
-        let next_image_result = self
-            .swapchain
-            .acquire_next_image(std::u64::MAX, image_available_semaphore);
+        self.in_flight_frames.next();
+        self.in_flight_frames.fence().wait(None)?;
+
+        let next_image_result = self.swapchain.acquire_next_image(
+            std::u64::MAX,
+            self.in_flight_frames.image_available_semaphore(),
+        );
         let image_index = match next_image_result {
-            Ok(AcquiredImage { index, .. }) => index,
+            Ok(AcquiredImage { index, .. }) => index as usize,
             Err(err) => match err.downcast_ref::<vk::Result>() {
                 Some(&vk::Result::ERROR_OUT_OF_DATE_KHR) => return Ok(true),
                 _ => panic!("Error while acquiring next image. Cause: {}", err),
             },
         };
 
-        fence.reset()?;
+        self.update_ubo_buffer()?;
 
-        let command_buffer = &self.command_buffers[image_index as usize];
-        self.context.graphics_queue.submit(
+        self.in_flight_frames.fence().reset()?;
+
+        let command_buffer = &self.command_buffers[image_index];
+
+        self.record_command_buffer(
             command_buffer,
-            Some(image_available_semaphore),
-            Some(vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT),
-            Some(render_finished_semaphore),
-            fence,
+            image_index,
+            &mut gui_context.renderer,
+            draw_data,
         )?;
 
-        let signal_semaphores = [render_finished_semaphore];
+        self.context.graphics_queue.submit(
+            command_buffer,
+            Some(self.in_flight_frames.image_available_semaphore()),
+            Some(vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT),
+            Some(self.in_flight_frames.render_finished_semaphore()),
+            self.in_flight_frames.fence(),
+        )?;
+
+        let signal_semaphores = [self.in_flight_frames.render_finished_semaphore()];
         let present_result = self.swapchain.queue_present(
-            image_index,
+            image_index as _,
             &signal_semaphores,
             &self.context.present_queue,
         );
@@ -335,44 +420,186 @@ impl App {
         Ok(false)
     }
 
+    fn update_ubo_buffer(&self) -> Result<()> {
+        let view = Mat4::look_at_rh(
+            self.camera.position.into(),
+            self.camera.target.into(),
+            vec3(0.0, 1.0, 0.0),
+        );
+        let inverted_view = view.inverse();
+
+        let width = self.swapchain.extent.width as f32;
+        let height = self.swapchain.extent.height as f32;
+
+        let proj = Mat4::perspective_infinite_rh(60f32.to_radians(), width / height, 0.1);
+        let inverted_proj = proj.inverse();
+
+        let light_direction = [
+            self.light.direction[0],
+            self.light.direction[1],
+            self.light.direction[2],
+            0.0,
+        ];
+        let light_color = [
+            self.light.color[0],
+            self.light.color[1],
+            self.light.color[2],
+            0.0,
+        ];
+
+        let cam_ubo = CameraUBO {
+            inverted_view,
+            inverted_proj,
+            light_direction,
+            light_color,
+        };
+
+        self.ubo_buffer.copy_data_to_buffer(&[cam_ubo])?;
+
+        Ok(())
+    }
+
+    fn record_command_buffer(
+        &self,
+        buffer: &VkCommandBuffer,
+        image_index: usize,
+        gui_renderer: &mut Renderer,
+        draw_data: &DrawData,
+    ) -> Result<()> {
+        let swapchain_image = &self.swapchain.images[image_index];
+        let framebuffer = &self.framebuffers[image_index];
+        let static_set = &self.descriptor_res.static_set;
+        let dynamic_set = &self.descriptor_res.dynamic_sets[image_index];
+        let storage_image = &self.storage_images[image_index];
+
+        let storage_image = &storage_image.image;
+
+        buffer.reset()?;
+
+        buffer.begin(vk::CommandBufferUsageFlags::SIMULTANEOUS_USE)?;
+
+        buffer.bind_pipeline(
+            vk::PipelineBindPoint::RAY_TRACING_KHR,
+            &self.pipeline_res.pipeline,
+        );
+
+        buffer.bind_descriptor_sets(
+            vk::PipelineBindPoint::RAY_TRACING_KHR,
+            &self.pipeline_res.pipeline_layout,
+            0,
+            &[static_set, dynamic_set],
+        );
+
+        buffer.trace_rays(
+            &self.sbt,
+            swapchain_image.extent.width,
+            swapchain_image.extent.height,
+        );
+
+        buffer.transition_layout(
+            swapchain_image,
+            vk::ImageLayout::UNDEFINED,
+            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+            vk::AccessFlags::empty(),
+            vk::AccessFlags::TRANSFER_WRITE,
+            vk::PipelineStageFlags::TOP_OF_PIPE,
+            vk::PipelineStageFlags::TRANSFER,
+        );
+
+        buffer.transition_layout(
+            storage_image,
+            vk::ImageLayout::GENERAL,
+            vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
+            vk::AccessFlags::empty(),
+            vk::AccessFlags::TRANSFER_READ,
+            vk::PipelineStageFlags::TOP_OF_PIPE,
+            vk::PipelineStageFlags::TRANSFER,
+        );
+
+        buffer.copy_image(
+            storage_image,
+            vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
+            swapchain_image,
+            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+        );
+
+        buffer.transition_layout(
+            swapchain_image,
+            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+            vk::ImageLayout::PRESENT_SRC_KHR,
+            vk::AccessFlags::TRANSFER_WRITE,
+            vk::AccessFlags::COLOR_ATTACHMENT_READ,
+            vk::PipelineStageFlags::TRANSFER,
+            vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+        );
+
+        buffer.transition_layout(
+            storage_image,
+            vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
+            vk::ImageLayout::GENERAL,
+            vk::AccessFlags::TRANSFER_READ,
+            vk::AccessFlags::empty(),
+            vk::PipelineStageFlags::TRANSFER,
+            vk::PipelineStageFlags::TOP_OF_PIPE,
+        );
+
+        buffer.begin_render_pass(&self.render_pass, framebuffer);
+
+        gui_renderer.cmd_draw(buffer.inner, draw_data)?;
+
+        buffer.end_render_pass();
+
+        buffer.end()?;
+
+        Ok(())
+    }
+
     pub fn wait_for_gpu(&self) -> Result<()> {
         self.context.device_wait_idle()
     }
 }
 
-impl Drop for App {
-    fn drop(&mut self) {
-        unsafe {
-            self.cleanup_swapchain_dependent_resources();
-        }
-    }
-}
+fn create_render_pass(context: &VkContext, swapchain: &VkSwapchain) -> Result<VkRenderPass> {
+    let attachment_descs = [vk::AttachmentDescription::builder()
+        .format(swapchain.format)
+        .samples(vk::SampleCountFlags::TYPE_1)
+        .load_op(vk::AttachmentLoadOp::DONT_CARE)
+        .store_op(vk::AttachmentStoreOp::STORE)
+        .initial_layout(vk::ImageLayout::UNDEFINED)
+        .final_layout(vk::ImageLayout::PRESENT_SRC_KHR)
+        .build()];
 
-fn create_ubo_buffer(context: &VkContext) -> Result<VkBuffer> {
-    let view = Mat4::look_at_rh(EYE_POS.into(), vec3(0.0, 1.0, 0.0), vec3(0.0, 1.0, 0.0));
-    let inverted_view = view.inverse();
+    let color_attachment_refs = [vk::AttachmentReference::builder()
+        .attachment(0)
+        .layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
+        .build()];
 
-    let proj = Mat4::perspective_infinite_rh(60f32.to_radians(), WIDTH as f32 / HEIGHT as f32, 0.1);
-    let inverted_proj = proj.inverse();
+    let subpass_descs = [vk::SubpassDescription::builder()
+        .pipeline_bind_point(vk::PipelineBindPoint::GRAPHICS)
+        .color_attachments(&color_attachment_refs)
+        .build()];
 
-    let cam_ubo = CameraUBO {
-        inverted_view,
-        inverted_proj,
-    };
+    let subpass_deps = [vk::SubpassDependency::builder()
+        .src_subpass(vk::SUBPASS_EXTERNAL)
+        .dst_subpass(0)
+        .src_stage_mask(vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT)
+        .src_access_mask(vk::AccessFlags::empty())
+        .dst_stage_mask(vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT)
+        .dst_access_mask(
+            vk::AccessFlags::COLOR_ATTACHMENT_READ | vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
+        )
+        .build()];
 
-    let ubo_buffer = context.create_buffer(
-        vk::BufferUsageFlags::UNIFORM_BUFFER,
-        MemoryLocation::CpuToGpu,
-        size_of_val(&cam_ubo) as _,
-    )?;
+    let render_pass_info = vk::RenderPassCreateInfo::builder()
+        .attachments(&attachment_descs)
+        .subpasses(&subpass_descs)
+        .dependencies(&subpass_deps);
 
-    ubo_buffer.copy_data_to_buffer(&[cam_ubo])?;
-
-    Ok(ubo_buffer)
+    context.create_render_pass(&render_pass_info)
 }
 
 fn create_model(context: &VkContext) -> Result<Model> {
-    let model = gltf::load_file("./crates/examples/assets/models/cesium_man_with_light.glb")?;
+    let model = gltf::load_file(MODEL_PATH)?;
     let vertices = model.vertices.as_slice();
     let indices = model.indices.as_slice();
 
@@ -753,7 +980,7 @@ fn create_pipeline(context: &VkContext, model: &Model) -> Result<PipelineRes> {
             .binding(2)
             .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
             .descriptor_count(1)
-            .stage_flags(vk::ShaderStageFlags::RAYGEN_KHR)
+            .stage_flags(vk::ShaderStageFlags::RAYGEN_KHR | vk::ShaderStageFlags::CLOSEST_HIT_KHR)
             .build(),
         // Vertex buffer
         vk::DescriptorSetLayoutBinding::builder()
@@ -801,22 +1028,22 @@ fn create_pipeline(context: &VkContext, model: &Model) -> Result<PipelineRes> {
     // Shaders
     let shaders_create_info = [
         VkRTShaderCreateInfo {
-            source: &include_bytes!("../../assets/shaders/shadows/raygen.rgen.spv")[..],
+            source: &include_bytes!("../../../../assets/shaders/shadows/raygen.rgen.spv")[..],
             stage: vk::ShaderStageFlags::RAYGEN_KHR,
             group: VkRTShaderGroup::RayGen,
         },
         VkRTShaderCreateInfo {
-            source: &include_bytes!("../../assets/shaders/shadows/miss.rmiss.spv")[..],
+            source: &include_bytes!("../../../../assets/shaders/shadows/miss.rmiss.spv")[..],
             stage: vk::ShaderStageFlags::MISS_KHR,
             group: VkRTShaderGroup::Miss,
         },
         VkRTShaderCreateInfo {
-            source: &include_bytes!("../../assets/shaders/shadows/shadow.rmiss.spv")[..],
+            source: &include_bytes!("../../../../assets/shaders/shadows/shadow.rmiss.spv")[..],
             stage: vk::ShaderStageFlags::MISS_KHR,
             group: VkRTShaderGroup::Miss,
         },
         VkRTShaderCreateInfo {
-            source: &include_bytes!("../../assets/shaders/shadows/closesthit.rchit.spv")[..],
+            source: &include_bytes!("../../../../assets/shaders/shadows/closesthit.rchit.spv")[..],
             stage: vk::ShaderStageFlags::CLOSEST_HIT_KHR,
             group: VkRTShaderGroup::ClosestHit,
         },
@@ -940,92 +1167,11 @@ fn create_descriptor_sets(
     })
 }
 
-fn create_and_record_command_buffers(
+fn create_command_buffers(
     pool: &VkCommandPool,
     swapchain: &VkSwapchain,
-    sbt: &VkShaderBindingTable,
-    pipeline_res: &PipelineRes,
-    descriptor_res: &DescriptorRes,
-    storage_images: &[ImageAndView],
 ) -> Result<Vec<VkCommandBuffer>> {
-    log::debug!("Creating and recording command buffers");
-    let buffers = pool
-        .allocate_command_buffers(vk::CommandBufferLevel::PRIMARY, swapchain.images.len() as _)?;
-
-    let static_set = &descriptor_res.static_set;
-
-    for (index, buffer) in buffers.iter().enumerate() {
-        let dynamic_set = &descriptor_res.dynamic_sets[index];
-        let swapchain_image = &swapchain.images[index];
-        let storage_image = &storage_images[index].image;
-
-        buffer.begin(vk::CommandBufferUsageFlags::SIMULTANEOUS_USE)?;
-
-        buffer.bind_pipeline(
-            vk::PipelineBindPoint::RAY_TRACING_KHR,
-            &pipeline_res.pipeline,
-        );
-
-        buffer.bind_descriptor_sets(
-            vk::PipelineBindPoint::RAY_TRACING_KHR,
-            &pipeline_res.pipeline_layout,
-            0,
-            &[static_set, dynamic_set],
-        );
-
-        buffer.trace_rays(sbt, swapchain.extent.width, swapchain.extent.height);
-
-        buffer.transition_layout(
-            swapchain_image,
-            vk::ImageLayout::UNDEFINED,
-            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-            vk::AccessFlags::empty(),
-            vk::AccessFlags::TRANSFER_WRITE,
-            vk::PipelineStageFlags::TOP_OF_PIPE,
-            vk::PipelineStageFlags::TRANSFER,
-        );
-
-        buffer.transition_layout(
-            storage_image,
-            vk::ImageLayout::GENERAL,
-            vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
-            vk::AccessFlags::empty(),
-            vk::AccessFlags::TRANSFER_READ,
-            vk::PipelineStageFlags::TOP_OF_PIPE,
-            vk::PipelineStageFlags::TRANSFER,
-        );
-
-        buffer.copy_image(
-            storage_image,
-            vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
-            swapchain_image,
-            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-        );
-
-        buffer.transition_layout(
-            swapchain_image,
-            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-            vk::ImageLayout::PRESENT_SRC_KHR,
-            vk::AccessFlags::TRANSFER_WRITE,
-            vk::AccessFlags::COLOR_ATTACHMENT_READ,
-            vk::PipelineStageFlags::TRANSFER,
-            vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-        );
-
-        buffer.transition_layout(
-            storage_image,
-            vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
-            vk::ImageLayout::GENERAL,
-            vk::AccessFlags::TRANSFER_READ,
-            vk::AccessFlags::empty(),
-            vk::PipelineStageFlags::TRANSFER,
-            vk::PipelineStageFlags::TOP_OF_PIPE,
-        );
-
-        buffer.end()?;
-    }
-
-    Ok(buffers)
+    pool.allocate_command_buffers(vk::CommandBufferLevel::PRIMARY, swapchain.images.len() as _)
 }
 
 struct InFlightFrames {
@@ -1055,12 +1201,20 @@ impl InFlightFrames {
         })
     }
 
-    fn next(&mut self) -> &SyncObjects {
-        let next = &self.sync_objects[self.current_frame];
-
+    fn next(&mut self) {
         self.current_frame = (self.current_frame + 1) % self.sync_objects.len();
+    }
 
-        next
+    fn image_available_semaphore(&self) -> &VkSemaphore {
+        &self.sync_objects[self.current_frame].image_available_semaphore
+    }
+
+    fn render_finished_semaphore(&self) -> &VkSemaphore {
+        &self.sync_objects[self.current_frame].render_finished_semaphore
+    }
+
+    fn fence(&self) -> &VkFence {
+        &self.sync_objects[self.current_frame].fence
     }
 }
 

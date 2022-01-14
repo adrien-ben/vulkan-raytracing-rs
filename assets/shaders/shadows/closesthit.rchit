@@ -22,6 +22,12 @@ struct GeometryInfo {
 };
 
 layout(binding = 0, set = 0) uniform accelerationStructureEXT topLevelAS;
+layout(binding = 2, set = 0) uniform SceneData {
+	mat4 invertedView;
+	mat4 invertedProj;
+	vec3 lightDirection;
+	vec3 lightColor;
+} scene;
 layout(binding = 3, set = 0) readonly buffer Vertices { Vertex v[]; } vertices;
 layout(binding = 4, set = 0) readonly buffer Indices { uint i[]; } indices;
 layout(binding = 5, set = 0) readonly buffer GeometryInfos { GeometryInfo g[]; } geometryInfos;
@@ -60,20 +66,18 @@ void main() {
     }
 
     // Lighting
-    const vec3 lightColor = vec3(1.0);
-    const vec3 lightDir = normalize(vec3(-2.0, -3.0, -2.0));
+    const vec3 lightColor = scene.lightColor;
+    const vec3 lightDir = normalize(scene.lightDirection);
     float dot_prod = dot(-lightDir, normal);
     float factor = max(0.3, dot_prod);
-    vec3 finalColor = factor * color * lightColor;
-
-    hitValue = finalColor;
+    vec3 finalColor = color * lightColor;
 
     isShadowed = true;
 
-    if (dot_prod >= 0) {
+    if (dot_prod > 0) {
         // Shadow casting
         float tmin = 0.001;
-        float tmax = 10.0;
+        float tmax = 100.0;
         vec3 origin = gl_WorldRayOriginEXT + gl_WorldRayDirectionEXT * gl_HitTEXT;
         
         // Trace shadow ray and offset indices to match shadow hit/miss shader group indices
@@ -94,6 +98,8 @@ void main() {
     }
 
     if (isShadowed) {
-        hitValue *= 0.3;
+        factor = 0.3;
     }
+
+    hitValue = factor * finalColor;
 }
