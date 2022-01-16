@@ -1,28 +1,25 @@
 use anyhow::Result;
+use ash::{
+    self,
+    extensions::{
+        ext::DebugUtils,
+        khr::{
+            AccelerationStructure as AccelerationStructureFn, DeferredHostOperations,
+            RayTracingPipeline, Surface, Swapchain as SwapchainFn,
+        },
+    },
+    vk::{self, Packed24_8},
+    Device, Entry, Instance,
+};
+use gpu_allocator::{
+    vulkan::{Allocation, AllocationCreateDesc, Allocator, AllocatorCreateDesc},
+    AllocatorDebugSettings, MemoryLocation,
+};
 use simple_logger::SimpleLogger;
 use std::{
     ffi::{CStr, CString},
     mem::{align_of, size_of, size_of_val},
     os::raw::c_void,
-};
-use vulkan::gpu_allocator::{
-    vulkan::{Allocation, AllocationCreateDesc, Allocator, AllocatorCreateDesc},
-    AllocatorDebugSettings, MemoryLocation,
-};
-use vulkan::{
-    ash::{
-        self,
-        extensions::{
-            ext::DebugUtils,
-            khr::{
-                AccelerationStructure as AccelerationStructureFn, DeferredHostOperations,
-                RayTracingPipeline, Surface, Swapchain as SwapchainFn,
-            },
-        },
-        vk::{self, Packed24_8},
-        Device, Entry, Instance,
-    },
-    ash_window,
 };
 use winit::{
     dpi::PhysicalSize,
@@ -1194,21 +1191,16 @@ fn create_pipeline(
     let pipe_layout = unsafe { device.create_pipeline_layout(&pipe_layout_info, None)? };
 
     // shader groups
-    let raygen_source = read_shader_from_bytes(
-        &include_bytes!("../../../../assets/shaders/triangle_basic/raygen.rgen.spv")[..],
-    )?;
+    let raygen_source = read_shader_from_bytes(&include_bytes!("../shaders/raygen.rgen.spv")[..])?;
     let raygen_create_info = vk::ShaderModuleCreateInfo::builder().code(&raygen_source);
     let raygen_module = unsafe { device.create_shader_module(&raygen_create_info, None)? };
 
-    let miss_source = read_shader_from_bytes(
-        &include_bytes!("../../../../assets/shaders/triangle_basic/miss.rmiss.spv")[..],
-    )?;
+    let miss_source = read_shader_from_bytes(&include_bytes!("../shaders/miss.rmiss.spv")[..])?;
     let miss_create_info = vk::ShaderModuleCreateInfo::builder().code(&miss_source);
     let miss_module = unsafe { device.create_shader_module(&miss_create_info, None)? };
 
-    let closesthit_source = read_shader_from_bytes(
-        &include_bytes!("../../../../assets/shaders/triangle_basic/closesthit.rchit.spv")[..],
-    )?;
+    let closesthit_source =
+        read_shader_from_bytes(&include_bytes!("../shaders/closesthit.rchit.spv")[..])?;
     let closesthit_create_info = vk::ShaderModuleCreateInfo::builder().code(&closesthit_source);
     let closesthit_module = unsafe { device.create_shader_module(&closesthit_create_info, None)? };
 

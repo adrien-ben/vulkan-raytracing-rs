@@ -344,7 +344,7 @@ impl App {
         let ui = gui_context.imgui.frame();
 
         imgui::Window::new("Vulkan RT")
-            .size([300.0, 200.0], imgui::Condition::FirstUseEver)
+            .size([300.0, 350.0], imgui::Condition::FirstUseEver)
             .build(&ui, || {
                 // Cam controls
                 ui.text_wrapped("Camera");
@@ -359,7 +359,10 @@ impl App {
 
                 ui.input_float3("direction", &mut self.light.direction)
                     .build();
-                ui.input_float3("color", &mut self.light.color).build();
+
+                imgui::ColorPicker::new("color", &mut self.light.color)
+                    .display_rgb(true)
+                    .build(&ui);
             });
 
         gui_context.platform.prepare_render(&ui, window);
@@ -478,6 +481,7 @@ impl App {
 
         buffer.begin(vk::CommandBufferUsageFlags::SIMULTANEOUS_USE)?;
 
+        // Ray Tracing
         buffer.bind_pipeline(
             vk::PipelineBindPoint::RAY_TRACING_KHR,
             &self.pipeline_res.pipeline,
@@ -496,6 +500,7 @@ impl App {
             swapchain_image.extent.height,
         );
 
+        // Copy ray tracing result into swapchain
         buffer.transition_layout(
             swapchain_image,
             vk::ImageLayout::UNDEFINED,
@@ -543,6 +548,7 @@ impl App {
             vk::PipelineStageFlags::TOP_OF_PIPE,
         );
 
+        // Gui pass
         buffer.begin_render_pass(&self.render_pass, framebuffer);
 
         gui_renderer.cmd_draw(buffer.inner, draw_data)?;
@@ -1028,22 +1034,22 @@ fn create_pipeline(context: &VkContext, model: &Model) -> Result<PipelineRes> {
     // Shaders
     let shaders_create_info = [
         VkRTShaderCreateInfo {
-            source: &include_bytes!("../../../../assets/shaders/shadows/raygen.rgen.spv")[..],
+            source: &include_bytes!("../shaders/raygen.rgen.spv")[..],
             stage: vk::ShaderStageFlags::RAYGEN_KHR,
             group: VkRTShaderGroup::RayGen,
         },
         VkRTShaderCreateInfo {
-            source: &include_bytes!("../../../../assets/shaders/shadows/miss.rmiss.spv")[..],
+            source: &include_bytes!("../shaders/miss.rmiss.spv")[..],
             stage: vk::ShaderStageFlags::MISS_KHR,
             group: VkRTShaderGroup::Miss,
         },
         VkRTShaderCreateInfo {
-            source: &include_bytes!("../../../../assets/shaders/shadows/shadow.rmiss.spv")[..],
+            source: &include_bytes!("../shaders/shadow.rmiss.spv")[..],
             stage: vk::ShaderStageFlags::MISS_KHR,
             group: VkRTShaderGroup::Miss,
         },
         VkRTShaderCreateInfo {
-            source: &include_bytes!("../../../../assets/shaders/shadows/closesthit.rchit.spv")[..],
+            source: &include_bytes!("../shaders/closesthit.rchit.spv")[..],
             stage: vk::ShaderStageFlags::CLOSEST_HIT_KHR,
             group: VkRTShaderGroup::ClosestHit,
         },

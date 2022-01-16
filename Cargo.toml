@@ -1,6 +1,8 @@
 [workspace]
 members = [
-    "crates/examples",
+    "crates/examples/triangle_basic",
+    "crates/examples/triangle_advanced",
+    "crates/examples/shadows",
     "crates/libs/vulkan",
     "crates/libs/gltf",
     "crates/libs/gui"

@@ -1058,6 +1058,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "shadows"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "glam",
+ "gltf 0.1.0",
+ "gui",
+ "log",
+ "simple_logger",
+ "vulkan",
+ "winit",
+]
+
+[[package]]
 name = "simple_logger"
 version = "1.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1159,6 +1173,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "triangle_advanced"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "log",
+ "simple_logger",
+ "vulkan",
+ "winit",
+]
+
+[[package]]
+name = "triangle_basic"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "ash",
+ "ash-window",
+ "gpu-allocator",
+ "log",
+ "simple_logger",
+ "winit",
+]
+
+[[package]]
 name = "ultraviolet"
 version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1189,20 +1227,6 @@ dependencies = [
  "gpu-allocator",
  "log",
  "raw-window-handle 0.4.2",
-]
-
-[[package]]
-name = "vulkan-raytracing-rs"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "glam",
- "gltf 0.1.0",
- "gui",
- "log",
- "simple_logger",
- "vulkan",
- "winit",
 ]
 
 [[package]]
