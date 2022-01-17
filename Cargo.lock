@@ -997,6 +997,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "reflections"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "glam",
+ "gltf 0.1.0",
+ "gui",
+ "log",
+ "simple_logger",
+ "vulkan",
+ "winit",
+]
+
+[[package]]
 name = "rustc-demangle"
 version = "0.1.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"

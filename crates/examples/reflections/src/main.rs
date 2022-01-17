@@ -25,11 +25,12 @@ use winit::{
 const WIDTH: u32 = 1920;
 const HEIGHT: u32 = 1080;
 const IN_FLIGHT_FRAMES: u32 = 2;
-const APP_NAME: &str = "Shadows";
+const APP_NAME: &str = "Reflections";
 
-const MODEL_PATH: &str = "./assets/models/shadows.glb";
-const EYE_POS: [f32; 3] = [-1.0, 1.5, 3.0];
+const MODEL_PATH: &str = "./assets/models/reflections.glb";
+const EYE_POS: [f32; 3] = [-2.0, 1.5, 2.0];
 const EYE_TARGET: [f32; 3] = [0.0, 1.0, 0.0];
+const MAX_DEPTH: u32 = 10;
 
 fn main() -> Result<()> {
     SimpleLogger::default().env().init()?;
@@ -162,11 +163,12 @@ struct Light {
 
 #[derive(Debug, Clone, Copy)]
 #[repr(C)]
-pub struct CameraUBO {
+pub struct SceneUBO {
     inverted_view: Mat4,
     inverted_proj: Mat4,
     light_direction: [f32; 4],
     light_color: [f32; 4],
+    max_depth: u32,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -175,6 +177,7 @@ pub struct GeometryInfo {
     transform: Mat4,
     base_color: [f32; 4],
     base_color_texture_index: i32,
+    metallic_factor: f32,
     vertex_offset: u32,
     index_offset: u32,
 }
@@ -187,6 +190,7 @@ struct App {
     pipeline_res: PipelineRes,
     camera: Camera,
     light: Light,
+    max_depth: u32,
     ubo_buffer: VkBuffer,
     _model: Model,
     _bottom_as: BottomAS,
@@ -239,7 +243,7 @@ impl App {
         let ubo_buffer = context.create_buffer(
             vk::BufferUsageFlags::UNIFORM_BUFFER,
             MemoryLocation::CpuToGpu,
-            size_of::<CameraUBO>() as _,
+            size_of::<SceneUBO>() as _,
         )?;
 
         let model = create_model(&context)?;
@@ -282,6 +286,7 @@ impl App {
             pipeline_res,
             camera,
             light,
+            max_depth: MAX_DEPTH,
             ubo_buffer,
             _model: model,
             _bottom_as: bottom_as,
@@ -343,8 +348,14 @@ impl App {
         let ui = gui_context.imgui.frame();
 
         imgui::Window::new("Vulkan RT")
-            .size([300.0, 350.0], imgui::Condition::FirstUseEver)
+            .size([300.0, 400.0], imgui::Condition::FirstUseEver)
             .build(&ui, || {
+                // RT controls
+                ui.text_wrapped("Rays");
+                let mut max_depth = self.max_depth as _;
+                ui.input_int("max depth", &mut max_depth).build();
+                self.max_depth = max_depth.max(1) as _;
+
                 // Cam controls
                 ui.text_wrapped("Camera");
                 ui.separator();
@@ -353,6 +364,7 @@ impl App {
                     .build();
                 ui.input_float3("target", &mut self.camera.target).build();
 
+                // Light control
                 ui.text_wrapped("Light");
                 ui.separator();
 
@@ -449,14 +461,15 @@ impl App {
             0.0,
         ];
 
-        let cam_ubo = CameraUBO {
+        let scene_ubo = SceneUBO {
             inverted_view,
             inverted_proj,
             light_direction,
             light_color,
+            max_depth: self.max_depth,
         };
 
-        self.ubo_buffer.copy_data_to_buffer(&[cam_ubo])?;
+        self.ubo_buffer.copy_data_to_buffer(&[scene_ubo])?;
 
         Ok(())
     }
@@ -834,6 +847,7 @@ fn create_bottom_as(context: &mut VkContext, model: &Model) -> Result<BottomAS> 
                 .material
                 .base_color_texture_index
                 .map_or(-1, |i| i as _),
+            metallic_factor: mesh.material.metallic_factor,
             vertex_offset: mesh.vertex_offset,
             index_offset: mesh.index_offset,
         });

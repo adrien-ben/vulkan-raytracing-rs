@@ -215,15 +215,14 @@ impl App {
 
         storage_images.iter().enumerate().for_each(|(index, img)| {
             let set = &self.descriptor_res.dynamic_sets[index];
-            let img_write_set = VkWriteDescriptorSet {
+
+            set.update_one(VkWriteDescriptorSet {
                 binding: 1,
                 kind: VkWriteDescriptorSetKind::StorageImage {
                     layout: vk::ImageLayout::GENERAL,
                     view: &img.view,
                 },
-            };
-
-            set.update(&img_write_set);
+            });
         });
 
         let _ = std::mem::replace(&mut self.storage_images, storage_images);
@@ -565,7 +564,7 @@ fn create_descriptor_sets(
     let static_set = pool.allocate_set(&pipeline_res.static_dsl)?;
     let dynamic_sets = pool.allocate_sets(&pipeline_res.dynamic_dsl, set_count)?;
 
-    static_set.update(&VkWriteDescriptorSet {
+    static_set.update_one(VkWriteDescriptorSet {
         binding: 0,
         kind: VkWriteDescriptorSetKind::AccelerationStructure {
             acceleration_structure: &top_as.inner,
@@ -573,7 +572,7 @@ fn create_descriptor_sets(
     });
 
     dynamic_sets.iter().enumerate().for_each(|(index, set)| {
-        set.update(&VkWriteDescriptorSet {
+        set.update_one(VkWriteDescriptorSet {
             binding: 1,
             kind: VkWriteDescriptorSetKind::StorageImage {
                 layout: vk::ImageLayout::GENERAL,

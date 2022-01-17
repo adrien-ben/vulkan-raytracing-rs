@@ -2,6 +2,7 @@
 pub struct Material {
     pub base_color: [f32; 4],
     pub base_color_texture_index: Option<usize>,
+    pub metallic_factor: f32,
 }
 
 impl<'a> From<gltf::Material<'a>> for Material {
@@ -10,6 +11,7 @@ impl<'a> From<gltf::Material<'a>> for Material {
         Self {
             base_color: pbr.base_color_factor(),
             base_color_texture_index: pbr.base_color_texture().map(|i| i.texture().index()),
+            metallic_factor: pbr.metallic_factor(),
         }
     }
 }

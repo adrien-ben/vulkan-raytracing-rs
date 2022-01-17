@@ -11,6 +11,7 @@ You can run one of the following example.
 - triangle_basic: Ray traced triangle with simple Vulkan setup (no frames in flight) and all code in one file.
 - triangle_advanced: Ray traced triangle with a Vulan setup a bit more involved and using some abstractions.
 - shadows: Raytraced gltf model with simulated sunlight shadow. It has one BLAS with multiple geometries. Light and camera controls with imgui.
+- reflections: Iterative (not recursive) reflections.
 
 ```ps1
 # Powershell example (all scripts have a .sh version)

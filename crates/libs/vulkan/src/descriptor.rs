@@ -95,7 +95,7 @@ pub struct VkDescriptorSet {
 }
 
 impl VkDescriptorSet {
-    pub fn update(&self, write: &VkWriteDescriptorSet) {
+    pub fn update_one(&self, write: VkWriteDescriptorSet) {
         use VkWriteDescriptorSetKind::*;
         match write.kind {
             StorageImage { view, layout } => {
@@ -175,6 +175,10 @@ impl VkDescriptorSet {
             }
         }
     }
+
+    pub fn update(&self, writes: &[VkWriteDescriptorSet]) {
+        writes.iter().for_each(|w| self.update_one(*w));
+    }
 }
 
 fn update_buffer_descriptor_sets(
@@ -217,10 +221,13 @@ impl VkContext {
     }
 }
 
+#[derive(Clone, Copy)]
 pub struct VkWriteDescriptorSet<'a> {
     pub binding: u32,
     pub kind: VkWriteDescriptorSetKind<'a>,
 }
+
+#[derive(Clone, Copy)]
 pub enum VkWriteDescriptorSetKind<'a> {
     StorageImage {
         view: &'a VkImageView,

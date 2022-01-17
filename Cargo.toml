@@ -3,6 +3,7 @@ members = [
     "crates/examples/triangle_basic",
     "crates/examples/triangle_advanced",
     "crates/examples/shadows",
+    "crates/examples/reflections",
     "crates/libs/vulkan",
     "crates/libs/gltf",
     "crates/libs/gui"
