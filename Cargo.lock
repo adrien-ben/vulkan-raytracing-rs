@@ -30,6 +30,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "84450d0b4a8bd1ba4144ce8ce718fbc5d071358b1e5384bace6536b3d1f2d5b3"
 
 [[package]]
+name = "app"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "glam",
+ "gui",
+ "log",
+ "simple_logger 2.1.0",
+ "vulkan",
+ "winit",
+]
+
+[[package]]
 name = "ash"
 version = "0.35.0+1.2.203"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -193,6 +206,17 @@ name = "colored"
 version = "1.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f4ffc801dacf156c5854b9df4f425a626539c3a6ef7893cc0c5084a23f0b6c59"
+dependencies = [
+ "atty",
+ "lazy_static",
+ "winapi",
+]
+
+[[package]]
+name = "colored"
+version = "2.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b3616f750b84d8f0de8a58bda93e08e2a81ad3f523089b05f1dffecab48c6cbd"
 dependencies = [
  "atty",
  "lazy_static",
@@ -1001,13 +1025,12 @@ name = "reflections"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "app",
  "glam",
  "gltf 0.1.0",
  "gui",
  "log",
- "simple_logger",
  "vulkan",
- "winit",
 ]
 
 [[package]]
@@ -1076,13 +1099,12 @@ name = "shadows"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "app",
  "glam",
  "gltf 0.1.0",
  "gui",
  "log",
- "simple_logger",
  "vulkan",
- "winit",
 ]
 
 [[package]]
@@ -1092,7 +1114,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "45b60258a35dc3cb8a16890b8fd6723349bfa458d7960e25e633f1b1c19d7b5e"
 dependencies = [
  "atty",
- "colored",
+ "colored 1.9.3",
+ "log",
+ "time",
+ "winapi",
+]
+
+[[package]]
+name = "simple_logger"
+version = "2.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c75a9723083573ace81ad0cdfc50b858aa3c366c48636edb4109d73122a0c0ea"
+dependencies = [
+ "atty",
+ "colored 2.0.0",
  "log",
  "time",
  "winapi",
@@ -1191,10 +1226,9 @@ name = "triangle_advanced"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "app",
  "log",
- "simple_logger",
  "vulkan",
- "winit",
 ]
 
 [[package]]
@@ -1206,7 +1240,7 @@ dependencies = [
  "ash-window",
  "gpu-allocator",
  "log",
- "simple_logger",
+ "simple_logger 1.16.0",
  "winit",
 ]
 

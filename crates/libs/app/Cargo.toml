@@ -1,5 +1,5 @@
 [package]
-name = "reflections"
+name = "app"
 version = "0.1.0"
 edition = "2021"
 
@@ -7,10 +7,10 @@ edition = "2021"
 
 [dependencies]
 log = "0.4"
+simple_logger = "2.1"
 anyhow = "1.0"
+winit = "0.26"
 glam = "0.20"
 
-app = { path = "../../libs/app" }
-vulkan = { path = "../../libs/vulkan" }
-gltf = { path = "../../libs/gltf" }
-gui = { path = "../../libs/gui" }
+vulkan = { path = "../vulkan" }
+gui = { path = "../gui" }

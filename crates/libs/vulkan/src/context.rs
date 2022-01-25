@@ -19,7 +19,7 @@ use crate::{
 
 pub struct VkContext {
     pub allocator: Arc<Mutex<Allocator>>,
-    command_pool: VkCommandPool,
+    pub command_pool: VkCommandPool,
     pub ray_tracing: Arc<VkRayTracingContext>,
     pub graphics_queue: VkQueue,
     pub present_queue: VkQueue,
