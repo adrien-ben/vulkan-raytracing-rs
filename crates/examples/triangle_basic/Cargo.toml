@@ -7,9 +7,9 @@ edition = "2021"
 
 [dependencies]
 log = "0.4"
-simple_logger = "1.11"
+simple_logger = "2.1"
 anyhow = "1.0"
 winit = "0.26"
-ash = { version = "0.35", features = ["linked"] }
+ash = { version = "0.36", features = ["linked"] }
 ash-window = "0.9"
-gpu-allocator = { version = "0.15", default-features = false, features = ["vulkan"] }
+gpu-allocator = { version = "0.17", default-features = false, features = ["vulkan"] }

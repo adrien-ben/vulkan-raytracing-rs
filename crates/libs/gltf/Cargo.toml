@@ -8,5 +8,5 @@ edition = "2021"
 [dependencies]
 log = "0.4"
 thiserror = "1.0"
-gltf = "0.16"
+gltf = "1.0"
 glam = "0.20"

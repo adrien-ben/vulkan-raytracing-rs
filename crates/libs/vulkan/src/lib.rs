@@ -36,7 +36,7 @@ pub use sampler::*;
 pub use swapchain::*;
 pub use sync::*;
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy)]
 pub struct VkVersion {
     pub variant: u32,
     pub major: u32,
@@ -45,7 +45,7 @@ pub struct VkVersion {
 }
 
 impl VkVersion {
-    pub fn new(variant: u32, major: u32, minor: u32, patch: u32) -> Self {
+    pub const fn new(variant: u32, major: u32, minor: u32, patch: u32) -> Self {
         Self {
             variant,
             major,
@@ -54,18 +54,27 @@ impl VkVersion {
         }
     }
 
-    pub fn from_major(major: u32) -> Self {
+    pub const fn from_major(major: u32) -> Self {
         Self {
             major,
-            ..Default::default()
+            ..Self::default()
         }
     }
 
-    pub fn from_major_minor(major: u32, minor: u32) -> Self {
+    pub const fn from_major_minor(major: u32, minor: u32) -> Self {
         Self {
             major,
             minor,
-            ..Default::default()
+            ..Self::default()
+        }
+    }
+
+    const fn default() -> Self {
+        Self {
+            variant: 0,
+            major: 0,
+            minor: 0,
+            patch: 0,
         }
     }
 

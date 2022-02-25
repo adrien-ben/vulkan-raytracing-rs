@@ -17,6 +17,7 @@ use winit::{
 };
 
 const IN_FLIGHT_FRAMES: u32 = 2;
+const VULKAN_VERSION: VkVersion = VkVersion::from_major_minor(1, 3);
 
 pub struct BaseApp<B: App> {
     phantom: PhantomData<B>,
@@ -159,12 +160,8 @@ impl<B: App> BaseApp<B> {
             "VK_KHR_acceleration_structure",
             "VK_KHR_deferred_host_operations",
         ];
-        let mut context = VkContext::new(
-            window,
-            VkVersion::from_major_minor(1, 2),
-            Some(app_name),
-            &required_extensions,
-        )?;
+        let mut context =
+            VkContext::new(window, VULKAN_VERSION, Some(app_name), &required_extensions)?;
 
         let command_pool = context.create_command_pool(
             context.graphics_queue_family,
