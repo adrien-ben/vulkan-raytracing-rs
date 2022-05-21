@@ -624,11 +624,7 @@ fn create_vulkan_instance(
         .engine_version(vk::make_api_version(0, 0, 1, 0))
         .api_version(vk::make_api_version(0, 1, 2, 0));
 
-    let extension_names = ash_window::enumerate_required_extensions(window)?;
-    let mut extension_names = extension_names
-        .iter()
-        .map(|ext| ext.as_ptr())
-        .collect::<Vec<_>>();
+    let mut extension_names = ash_window::enumerate_required_extensions(window)?.to_vec();
     extension_names.push(DebugUtils::name().as_ptr());
 
     let instance_create_info = vk::InstanceCreateInfo::builder()
