@@ -8,7 +8,7 @@ use anyhow::Result;
 use imgui::{Context, DrawData, FontConfig, FontSource};
 use imgui_rs_vulkan_renderer::{Options, Renderer};
 use imgui_winit_support::{HiDpiMode, WinitPlatform};
-use vulkan::{VkCommandBuffer, VkCommandPool, VkContext, VkRenderPass};
+use vulkan::{ash::vk, VkCommandBuffer, VkCommandPool, VkContext};
 use winit::{event::Event, window::Window};
 
 pub struct GuiContext {
@@ -21,7 +21,7 @@ impl GuiContext {
     pub fn new(
         context: &VkContext,
         command_pool: &VkCommandPool,
-        render_pass: &VkRenderPass,
+        format: vk::Format,
         window: &Window,
         in_flight_frames: usize,
     ) -> Result<Self> {
@@ -56,7 +56,7 @@ impl GuiContext {
             context.device.inner.clone(),
             context.graphics_queue.inner,
             command_pool.inner,
-            render_pass.inner,
+            format,
             &mut imgui,
             Some(Options {
                 in_flight_frames,
@@ -78,12 +78,6 @@ impl GuiContext {
 
     pub fn update_delta_time(&mut self, delta: Duration) {
         self.imgui.io_mut().update_delta_time(delta);
-    }
-
-    pub fn set_render_pass(&mut self, render_pass: &VkRenderPass) -> Result<()> {
-        self.renderer.set_render_pass(render_pass.inner)?;
-
-        Ok(())
     }
 
     pub fn cmd_draw(&mut self, buffer: &VkCommandBuffer, draw_data: &DrawData) -> Result<()> {

@@ -1499,7 +1499,7 @@ fn build_as(
     as_build_geo_info: &vk::AccelerationStructureBuildGeometryInfoKHR,
     as_build_range_info: &vk::AccelerationStructureBuildRangeInfoKHR,
 ) -> Result<()> {
-    let result = execute_one_time_commands(device, queue, command_pool, |cmd_buffer| {
+    execute_one_time_commands(device, queue, command_pool, |cmd_buffer| {
         unsafe {
             acceleration_struct_fn.cmd_build_acceleration_structures(
                 cmd_buffer,
@@ -1509,7 +1509,7 @@ fn build_as(
         };
     })?;
 
-    Ok(result)
+    Ok(())
 }
 
 fn execute_one_time_commands<R, F: FnOnce(vk::CommandBuffer) -> R>(

@@ -142,6 +142,7 @@ fn select_suitable_physical_device(
                 && extention_support
                 && !device.supported_surface_formats.is_empty()
                 && !device.supported_present_modes.is_empty()
+                && device.supports_dynamic_rendering
         })
         .ok_or_else(|| anyhow::anyhow!("Could not find a suitable device"))?;
 
