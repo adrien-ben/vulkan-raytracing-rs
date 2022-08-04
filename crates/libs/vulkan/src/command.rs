@@ -4,9 +4,8 @@ use anyhow::Result;
 use ash::vk;
 
 use crate::{
-    device::VkDevice, VkBuffer, VkContext, VkDescriptorSet, VkFramebuffer, VkImage,
-    VkPipelineLayout, VkQueueFamily, VkRTPipeline, VkRayTracingContext, VkRenderPass,
-    VkShaderBindingTable,
+    device::VkDevice, VkBuffer, VkContext, VkDescriptorSet, VkImage, VkImageView, VkPipelineLayout,
+    VkQueueFamily, VkRTPipeline, VkRayTracingContext, VkShaderBindingTable,
 };
 
 pub struct VkCommandPool {
@@ -306,33 +305,34 @@ impl VkCommandBuffer {
         };
     }
 
-    pub fn begin_render_pass(&self, render_pass: &VkRenderPass, framebuffer: &VkFramebuffer) {
-        let render_pass_begin_info = vk::RenderPassBeginInfo::builder()
-            .render_pass(render_pass.inner)
-            .framebuffer(framebuffer.inner)
-            .render_area(vk::Rect2D {
-                offset: vk::Offset2D { x: 0, y: 0 },
-                extent: vk::Extent2D {
-                    width: framebuffer.width,
-                    height: framebuffer.height,
-                },
-            })
-            .clear_values(&[vk::ClearValue {
+    pub fn begin_rendering(&self, image_view: &VkImageView, extent: vk::Extent2D) {
+        let color_attachment_info = vk::RenderingAttachmentInfo::builder()
+            .image_view(image_view.inner)
+            .image_layout(vk::ImageLayout::ATTACHMENT_OPTIMAL)
+            .load_op(vk::AttachmentLoadOp::DONT_CARE)
+            .store_op(vk::AttachmentStoreOp::STORE)
+            .clear_value(vk::ClearValue {
                 color: vk::ClearColorValue {
                     float32: [1.0, 1.0, 1.0, 1.0],
                 },
-            }]);
+            });
+
+        let rendering_info = vk::RenderingInfo::builder()
+            .render_area(vk::Rect2D {
+                offset: vk::Offset2D { x: 0, y: 0 },
+                extent,
+            })
+            .layer_count(1)
+            .color_attachments(std::slice::from_ref(&color_attachment_info));
 
         unsafe {
-            self.device.inner.cmd_begin_render_pass(
-                self.inner,
-                &render_pass_begin_info,
-                vk::SubpassContents::INLINE,
-            )
+            self.device
+                .inner
+                .cmd_begin_rendering(self.inner, &rendering_info)
         };
     }
 
-    pub fn end_render_pass(&self) {
-        unsafe { self.device.inner.cmd_end_render_pass(self.inner) };
+    pub fn end_rendering(&self) {
+        unsafe { self.device.inner.cmd_end_rendering(self.inner) };
     }
 }

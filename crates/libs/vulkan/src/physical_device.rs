@@ -13,6 +13,7 @@ pub struct VkPhysicalDevice {
     pub(crate) supported_extensions: Vec<String>,
     pub(crate) supported_surface_formats: Vec<vk::SurfaceFormatKHR>,
     pub(crate) supported_present_modes: Vec<vk::PresentModeKHR>,
+    pub(crate) supports_dynamic_rendering: bool,
 }
 
 impl VkPhysicalDevice {
@@ -68,6 +69,15 @@ impl VkPhysicalDevice {
                 .get_physical_device_surface_present_modes(inner, surface.surface_khr)?
         };
 
+        let supports_dynamic_rendering = {
+            let mut features13 = vk::PhysicalDeviceVulkan13Features::default();
+            let mut features = vk::PhysicalDeviceFeatures2::builder().push_next(&mut features13);
+
+            unsafe { instance.get_physical_device_features2(inner, &mut features) };
+
+            features13.dynamic_rendering == vk::TRUE
+        };
+
         Ok(Self {
             inner,
             name,
@@ -75,6 +85,7 @@ impl VkPhysicalDevice {
             supported_extensions,
             supported_surface_formats,
             supported_present_modes,
+            supports_dynamic_rendering,
         })
     }
 

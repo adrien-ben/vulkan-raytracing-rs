@@ -22,8 +22,6 @@ const VULKAN_VERSION: VkVersion = VkVersion::from_major_minor(1, 3);
 pub struct BaseApp<B: App> {
     phantom: PhantomData<B>,
     pub swapchain: VkSwapchain,
-    render_pass: VkRenderPass,
-    framebuffers: Vec<VkFramebuffer>,
     pub command_pool: VkCommandPool,
     pub storage_images: Vec<ImageAndView>,
     command_buffers: Vec<VkCommandBuffer>,
@@ -72,7 +70,7 @@ pub fn run<A: App + 'static>(app_name: &str, width: u32, height: u32) -> Result<
     let mut gui_context = GuiContext::new(
         &base_app.context,
         &base_app.context.command_pool,
-        &base_app.render_pass,
+        base_app.swapchain.format,
         &window,
         IN_FLIGHT_FRAMES as _,
     )?;
@@ -110,9 +108,6 @@ pub fn run<A: App + 'static>(app_name: &str, width: u32, height: u32) -> Result<
                             .expect("Failed to recreate swapchain");
                         app.on_recreate_swapchain(base_app.storage_images.as_slice())
                             .expect("Error on recreate swapchain callback");
-                        gui_context
-                            .set_render_pass(&base_app.render_pass)
-                            .expect("Failed to set gui render pass");
                     } else {
                         return;
                     }
@@ -170,10 +165,6 @@ impl<B: App> BaseApp<B> {
 
         let swapchain = VkSwapchain::new(&context, width, height)?;
 
-        let render_pass = create_render_pass(&context, &swapchain)?;
-
-        let framebuffers = swapchain.get_framebuffers(&render_pass)?;
-
         let storage_images = create_storage_images(
             &mut context,
             swapchain.format,
@@ -190,8 +181,6 @@ impl<B: App> BaseApp<B> {
             context,
             command_pool,
             swapchain,
-            render_pass,
-            framebuffers,
             storage_images,
             command_buffers,
             in_flight_frames,
@@ -204,14 +193,7 @@ impl<B: App> BaseApp<B> {
         self.wait_for_gpu()?;
 
         // Swapchain and dependent resources
-        self.framebuffers.clear();
         self.swapchain.resize(&self.context, width, height)?;
-
-        let render_pass = create_render_pass(&self.context, &self.swapchain)?;
-        let _ = std::mem::replace(&mut self.render_pass, render_pass);
-
-        let framebuffers = self.swapchain.get_framebuffers(&self.render_pass)?;
-        let _ = std::mem::replace(&mut self.framebuffers, framebuffers);
 
         // Recreate storage image for RT and update descriptor set
         let storage_images = create_storage_images(
@@ -314,7 +296,7 @@ impl<B: App> BaseApp<B> {
         draw_data: &DrawData,
     ) -> Result<()> {
         let swapchain_image = &self.swapchain.images[image_index];
-        let framebuffer = &self.framebuffers[image_index];
+        let swapchain_image_view = &self.swapchain.views[image_index];
         let storage_image = &self.storage_images[image_index];
 
         let storage_image = &storage_image.image;
@@ -356,9 +338,9 @@ impl<B: App> BaseApp<B> {
         buffer.transition_layout(
             swapchain_image,
             vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-            vk::ImageLayout::PRESENT_SRC_KHR,
+            vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
             vk::AccessFlags::TRANSFER_WRITE,
-            vk::AccessFlags::COLOR_ATTACHMENT_READ,
+            vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
             vk::PipelineStageFlags::TRANSFER,
             vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
         );
@@ -374,55 +356,26 @@ impl<B: App> BaseApp<B> {
         );
 
         // Gui pass
-        buffer.begin_render_pass(&self.render_pass, framebuffer);
+        buffer.begin_rendering(swapchain_image_view, self.swapchain.extent);
 
         gui_renderer.cmd_draw(buffer.inner, draw_data)?;
 
-        buffer.end_render_pass();
+        buffer.end_rendering();
+
+        buffer.transition_layout(
+            swapchain_image,
+            vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+            vk::ImageLayout::PRESENT_SRC_KHR,
+            vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
+            vk::AccessFlags::COLOR_ATTACHMENT_READ,
+            vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+            vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+        );
 
         buffer.end()?;
 
         Ok(())
     }
-}
-
-fn create_render_pass(context: &VkContext, swapchain: &VkSwapchain) -> Result<VkRenderPass> {
-    let attachment_descs = [vk::AttachmentDescription::builder()
-        .format(swapchain.format)
-        .samples(vk::SampleCountFlags::TYPE_1)
-        .load_op(vk::AttachmentLoadOp::DONT_CARE)
-        .store_op(vk::AttachmentStoreOp::STORE)
-        .initial_layout(vk::ImageLayout::UNDEFINED)
-        .final_layout(vk::ImageLayout::PRESENT_SRC_KHR)
-        .build()];
-
-    let color_attachment_refs = [vk::AttachmentReference::builder()
-        .attachment(0)
-        .layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
-        .build()];
-
-    let subpass_descs = [vk::SubpassDescription::builder()
-        .pipeline_bind_point(vk::PipelineBindPoint::GRAPHICS)
-        .color_attachments(&color_attachment_refs)
-        .build()];
-
-    let subpass_deps = [vk::SubpassDependency::builder()
-        .src_subpass(vk::SUBPASS_EXTERNAL)
-        .dst_subpass(0)
-        .src_stage_mask(vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT)
-        .src_access_mask(vk::AccessFlags::empty())
-        .dst_stage_mask(vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT)
-        .dst_access_mask(
-            vk::AccessFlags::COLOR_ATTACHMENT_READ | vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
-        )
-        .build()];
-
-    let render_pass_info = vk::RenderPassCreateInfo::builder()
-        .attachments(&attachment_descs)
-        .subpasses(&subpass_descs)
-        .dependencies(&subpass_deps);
-
-    context.create_render_pass(&render_pass_info)
 }
 
 fn create_storage_images(
