@@ -353,10 +353,10 @@ fn create_model(context: &VkContext) -> Result<Model> {
                 &image,
                 vk::ImageLayout::UNDEFINED,
                 vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-                vk::AccessFlags::empty(),
-                vk::AccessFlags::TRANSFER_WRITE,
-                vk::PipelineStageFlags::TOP_OF_PIPE,
-                vk::PipelineStageFlags::TRANSFER,
+                vk::AccessFlags2::NONE,
+                vk::AccessFlags2::TRANSFER_WRITE,
+                vk::PipelineStageFlags2::NONE,
+                vk::PipelineStageFlags2::TRANSFER,
             );
 
             cmd.copy_buffer_to_image(&staging, &image, vk::ImageLayout::TRANSFER_DST_OPTIMAL);
@@ -365,10 +365,10 @@ fn create_model(context: &VkContext) -> Result<Model> {
                 &image,
                 vk::ImageLayout::TRANSFER_DST_OPTIMAL,
                 vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-                vk::AccessFlags::TRANSFER_WRITE,
-                vk::AccessFlags::SHADER_READ,
-                vk::PipelineStageFlags::TRANSFER,
-                vk::PipelineStageFlags::RAY_TRACING_SHADER_KHR,
+                vk::AccessFlags2::TRANSFER_WRITE,
+                vk::AccessFlags2::SHADER_READ,
+                vk::PipelineStageFlags2::TRANSFER,
+                vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
             );
         })?;
 
@@ -395,10 +395,10 @@ fn create_model(context: &VkContext) -> Result<Model> {
                 &image,
                 vk::ImageLayout::UNDEFINED,
                 vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-                vk::AccessFlags::empty(),
-                vk::AccessFlags::SHADER_READ,
-                vk::PipelineStageFlags::TOP_OF_PIPE,
-                vk::PipelineStageFlags::RAY_TRACING_SHADER_KHR,
+                vk::AccessFlags2::NONE,
+                vk::AccessFlags2::SHADER_READ,
+                vk::PipelineStageFlags2::NONE,
+                vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
             );
         })?;
 

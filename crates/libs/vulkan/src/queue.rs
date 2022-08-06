@@ -55,30 +55,51 @@ impl VkQueue {
     pub fn submit(
         &self,
         command_buffer: &VkCommandBuffer,
-        wait_semaphore: Option<&VkSemaphore>,
-        wait_dst_stage_mask: Option<vk::PipelineStageFlags>,
-        signal_semaphore: Option<&VkSemaphore>,
+        wait_semaphore: Option<VkSemaphoreSubmitInfo>,
+        signal_semaphore: Option<VkSemaphoreSubmitInfo>,
         fence: &VkFence,
     ) -> Result<()> {
-        let buffs = [command_buffer.inner];
-        let wait_semaphores = wait_semaphore.map(|s| vec![s.inner]).unwrap_or_default();
-        let wait_dst_stage_mask = wait_dst_stage_mask.map(|f| vec![f]).unwrap_or_default();
-        let signal_semaphores = signal_semaphore.map(|s| vec![s.inner]).unwrap_or_default();
+        let wait_semaphore_submit_info = wait_semaphore.map(|s| {
+            vk::SemaphoreSubmitInfo::builder()
+                .semaphore(s.semaphore.inner)
+                .stage_mask(s.stage_mask)
+        });
 
-        let submit_info = vk::SubmitInfo::builder()
-            .command_buffers(&buffs)
-            .wait_semaphores(&wait_semaphores)
-            .wait_dst_stage_mask(&wait_dst_stage_mask)
-            .signal_semaphores(&signal_semaphores);
+        let signal_semaphore_submit_info = signal_semaphore.map(|s| {
+            vk::SemaphoreSubmitInfo::builder()
+                .semaphore(s.semaphore.inner)
+                .stage_mask(s.stage_mask)
+        });
+
+        let cmd_buffer_submit_info =
+            vk::CommandBufferSubmitInfo::builder().command_buffer(command_buffer.inner);
+
+        let submit_info = vk::SubmitInfo2::builder()
+            .command_buffer_infos(std::slice::from_ref(&cmd_buffer_submit_info));
+
+        let submit_info = match wait_semaphore_submit_info.as_ref() {
+            Some(info) => submit_info.wait_semaphore_infos(std::slice::from_ref(info)),
+            None => submit_info,
+        };
+
+        let submit_info = match signal_semaphore_submit_info.as_ref() {
+            Some(info) => submit_info.signal_semaphore_infos(std::slice::from_ref(info)),
+            None => submit_info,
+        };
 
         unsafe {
-            self.device.inner.queue_submit(
+            self.device.inner.queue_submit2(
                 self.inner,
                 std::slice::from_ref(&submit_info),
                 fence.inner,
-            )?;
+            )?
         };
 
         Ok(())
     }
+}
+
+pub struct VkSemaphoreSubmitInfo<'a> {
+    pub semaphore: &'a VkSemaphore,
+    pub stage_mask: vk::PipelineStageFlags2,
 }

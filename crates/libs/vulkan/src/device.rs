@@ -52,8 +52,9 @@ impl VkDevice {
         let mut vulkan_12_features = vk::PhysicalDeviceVulkan12Features::builder()
             .runtime_descriptor_array(true)
             .buffer_device_address(true);
-        let mut vulkan_13_features =
-            vk::PhysicalDeviceVulkan13Features::builder().dynamic_rendering(true);
+        let mut vulkan_13_features = vk::PhysicalDeviceVulkan13Features::builder()
+            .dynamic_rendering(true)
+            .synchronization2(true);
 
         let mut features = vk::PhysicalDeviceFeatures2::builder()
             .features(vk::PhysicalDeviceFeatures::default())

@@ -495,22 +495,31 @@ impl App {
 
         unsafe { self.device.reset_fences(&[fence])? };
 
-        let wait_stages = [vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT];
-        let wait_semaphores = [self.image_available_semaphore];
-        let signal_semaphores = [self.render_finished_semaphore];
+        let wait_semaphore_submit_info = vk::SemaphoreSubmitInfo::builder()
+            .semaphore(self.image_available_semaphore)
+            .stage_mask(vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT);
 
-        let command_buffers = [self.command_buffers[image_index as usize]];
-        let submit_info = [vk::SubmitInfo::builder()
-            .wait_semaphores(&wait_semaphores)
-            .wait_dst_stage_mask(&wait_stages)
-            .command_buffers(&command_buffers)
-            .signal_semaphores(&signal_semaphores)
-            .build()];
+        let signal_semaphore_submit_info = vk::SemaphoreSubmitInfo::builder()
+            .semaphore(self.render_finished_semaphore)
+            .stage_mask(vk::PipelineStageFlags2::ALL_COMMANDS);
+
+        let cmd_buffer_submit_info = vk::CommandBufferSubmitInfo::builder()
+            .command_buffer(self.command_buffers[image_index as usize]);
+
+        let submit_info = vk::SubmitInfo2::builder()
+            .wait_semaphore_infos(std::slice::from_ref(&wait_semaphore_submit_info))
+            .signal_semaphore_infos(std::slice::from_ref(&signal_semaphore_submit_info))
+            .command_buffer_infos(std::slice::from_ref(&cmd_buffer_submit_info));
+
         unsafe {
-            self.device
-                .queue_submit(self.graphics_queue, &submit_info, fence)?
+            self.device.queue_submit2(
+                self.graphics_queue,
+                std::slice::from_ref(&submit_info),
+                fence,
+            )?
         };
 
+        let signal_semaphores = [self.render_finished_semaphore];
         let swapchains = [self.swapchain.swapchain_khr];
         let images_indices = [image_index];
         let present_info = vk::PresentInfoKHR::builder()
@@ -622,7 +631,7 @@ fn create_vulkan_instance(
         .application_version(vk::make_api_version(0, 0, 1, 0))
         .engine_name(engine_name.as_c_str())
         .engine_version(vk::make_api_version(0, 0, 1, 0))
-        .api_version(vk::make_api_version(0, 1, 2, 0));
+        .api_version(vk::make_api_version(0, 1, 3, 0));
 
     let mut extension_names = ash_window::enumerate_required_extensions(window)?.to_vec();
     extension_names.push(DebugUtils::name().as_ptr());
@@ -748,11 +757,17 @@ fn create_vulkan_physical_device_and_get_graphics_and_present_qs_indices(
                     .expect("Failed to get physical device surface present modes")
             };
 
+            // Check 1.3 features
+            let mut features13 = vk::PhysicalDeviceVulkan13Features::default();
+            let mut features = vk::PhysicalDeviceFeatures2::builder().push_next(&mut features13);
+            unsafe { instance.get_physical_device_features2(device, &mut features) };
+
             graphics.is_some()
                 && present.is_some()
                 && extention_support
                 && !formats.is_empty()
                 && !present_modes.is_empty()
+                && features13.synchronization2 == vk::TRUE
         })
         .expect("Could not find a suitable device");
 
@@ -801,12 +816,14 @@ fn create_vulkan_device_and_graphics_and_present_qs(
         vk::PhysicalDeviceAccelerationStructureFeaturesKHR::builder().acceleration_structure(true);
     let mut device_addr_feature =
         vk::PhysicalDeviceBufferDeviceAddressFeatures::builder().buffer_device_address(true);
+    let mut features13 = vk::PhysicalDeviceVulkan13Features::builder().synchronization2(true);
 
     let mut features = vk::PhysicalDeviceFeatures2::builder()
         .features(vk::PhysicalDeviceFeatures::default())
         .push_next(&mut device_addr_feature)
         .push_next(&mut acceleration_struct_feature)
-        .push_next(&mut ray_tracing_feature);
+        .push_next(&mut ray_tracing_feature)
+        .push_next(&mut features13);
 
     let device_create_info = vk::DeviceCreateInfo::builder()
         .queue_create_infos(&queue_create_infos)
@@ -1145,10 +1162,10 @@ fn create_storage_image(
             image,
             vk::ImageLayout::UNDEFINED,
             vk::ImageLayout::GENERAL,
-            vk::AccessFlags::empty(),
-            vk::AccessFlags::empty(),
-            vk::PipelineStageFlags::TOP_OF_PIPE,
-            vk::PipelineStageFlags::TOP_OF_PIPE,
+            vk::AccessFlags2::NONE,
+            vk::AccessFlags2::NONE,
+            vk::PipelineStageFlags2::NONE,
+            vk::PipelineStageFlags2::ALL_COMMANDS,
         );
     })?;
 
@@ -1542,15 +1559,17 @@ fn execute_one_time_commands<R, F: FnOnce(vk::CommandBuffer) -> R>(
     unsafe { device.end_command_buffer(command_buffer)? };
 
     // Submit and wait
-    let submit_info = vk::SubmitInfo::builder()
-        .command_buffers(&command_buffers)
-        .build();
+    let cmd_buffer_submit_info =
+        vk::CommandBufferSubmitInfo::builder().command_buffer(command_buffer);
+
+    let submit_info = vk::SubmitInfo2::builder()
+        .command_buffer_infos(std::slice::from_ref(&cmd_buffer_submit_info));
 
     let fence_info = vk::FenceCreateInfo::builder();
     let fence = unsafe { device.create_fence(&fence_info, None)? };
 
     unsafe {
-        device.queue_submit(queue, std::slice::from_ref(&submit_info), fence)?;
+        device.queue_submit2(queue, std::slice::from_ref(&submit_info), fence)?;
         device.wait_for_fences(&[fence], true, std::u64::MAX)?;
     };
 
@@ -1569,37 +1588,30 @@ fn transition_image_layout(
     image: vk::Image,
     old_layout: vk::ImageLayout,
     new_layout: vk::ImageLayout,
-    src_access_mask: vk::AccessFlags,
-    dst_access_mask: vk::AccessFlags,
-    src_stage_mask: vk::PipelineStageFlags,
-    dst_stage_mask: vk::PipelineStageFlags,
+    src_access_mask: vk::AccessFlags2,
+    dst_access_mask: vk::AccessFlags2,
+    src_stage_mask: vk::PipelineStageFlags2,
+    dst_stage_mask: vk::PipelineStageFlags2,
 ) {
-    let barrier = vk::ImageMemoryBarrier::builder()
+    let image_memory_barrier = vk::ImageMemoryBarrier2::builder()
+        .src_stage_mask(src_stage_mask)
+        .src_access_mask(src_access_mask)
         .old_layout(old_layout)
+        .dst_stage_mask(dst_stage_mask)
+        .dst_access_mask(dst_access_mask)
         .new_layout(new_layout)
         .image(image)
         .subresource_range(vk::ImageSubresourceRange {
             aspect_mask: vk::ImageAspectFlags::COLOR,
-            base_mip_level: 0,
-            level_count: 1,
-            base_array_layer: 0,
             layer_count: 1,
-        })
-        .src_access_mask(src_access_mask)
-        .dst_access_mask(dst_access_mask)
-        .build();
+            level_count: 1,
+            ..Default::default()
+        });
 
-    unsafe {
-        device.cmd_pipeline_barrier(
-            command_buffer,
-            src_stage_mask,
-            dst_stage_mask,
-            vk::DependencyFlags::empty(),
-            &[],
-            &[],
-            &[barrier],
-        )
-    };
+    let dependency_info = vk::DependencyInfo::builder()
+        .image_memory_barriers(std::slice::from_ref(&image_memory_barrier));
+
+    unsafe { device.cmd_pipeline_barrier2(command_buffer, &dependency_info) };
 }
 
 fn compute_aligned_size(size: u32, alignment: u32) -> u32 {
@@ -1806,10 +1818,10 @@ fn create_and_record_command_buffers(
             swapchain_image,
             vk::ImageLayout::UNDEFINED,
             vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-            vk::AccessFlags::empty(),
-            vk::AccessFlags::TRANSFER_WRITE,
-            vk::PipelineStageFlags::TOP_OF_PIPE,
-            vk::PipelineStageFlags::TRANSFER,
+            vk::AccessFlags2::NONE,
+            vk::AccessFlags2::TRANSFER_WRITE,
+            vk::PipelineStageFlags2::NONE,
+            vk::PipelineStageFlags2::TRANSFER,
         );
 
         transition_image_layout(
@@ -1818,10 +1830,10 @@ fn create_and_record_command_buffers(
             storage_image.image,
             vk::ImageLayout::GENERAL,
             vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
-            vk::AccessFlags::empty(),
-            vk::AccessFlags::TRANSFER_READ,
-            vk::PipelineStageFlags::TOP_OF_PIPE,
-            vk::PipelineStageFlags::TRANSFER,
+            vk::AccessFlags2::NONE,
+            vk::AccessFlags2::TRANSFER_READ,
+            vk::PipelineStageFlags2::NONE,
+            vk::PipelineStageFlags2::TRANSFER,
         );
 
         let copy_region = vk::ImageCopy::builder()
@@ -1860,10 +1872,10 @@ fn create_and_record_command_buffers(
             swapchain_image,
             vk::ImageLayout::TRANSFER_DST_OPTIMAL,
             vk::ImageLayout::PRESENT_SRC_KHR,
-            vk::AccessFlags::TRANSFER_WRITE,
-            vk::AccessFlags::COLOR_ATTACHMENT_READ,
-            vk::PipelineStageFlags::TRANSFER,
-            vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+            vk::AccessFlags2::TRANSFER_WRITE,
+            vk::AccessFlags2::COLOR_ATTACHMENT_READ,
+            vk::PipelineStageFlags2::TRANSFER,
+            vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
         );
 
         transition_image_layout(
@@ -1872,10 +1884,10 @@ fn create_and_record_command_buffers(
             storage_image.image,
             vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
             vk::ImageLayout::GENERAL,
-            vk::AccessFlags::TRANSFER_READ,
-            vk::AccessFlags::empty(),
-            vk::PipelineStageFlags::TRANSFER,
-            vk::PipelineStageFlags::TOP_OF_PIPE,
+            vk::AccessFlags2::TRANSFER_READ,
+            vk::AccessFlags2::NONE,
+            vk::PipelineStageFlags2::TRANSFER,
+            vk::PipelineStageFlags2::ALL_COMMANDS,
         );
 
         unsafe { device.end_command_buffer(buffer)? };

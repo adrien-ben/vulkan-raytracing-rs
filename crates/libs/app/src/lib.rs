@@ -263,9 +263,14 @@ impl<B: App> BaseApp<B> {
 
         self.context.graphics_queue.submit(
             command_buffer,
-            Some(self.in_flight_frames.image_available_semaphore()),
-            Some(vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT),
-            Some(self.in_flight_frames.render_finished_semaphore()),
+            Some(VkSemaphoreSubmitInfo {
+                semaphore: self.in_flight_frames.image_available_semaphore(),
+                stage_mask: vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
+            }),
+            Some(VkSemaphoreSubmitInfo {
+                semaphore: self.in_flight_frames.render_finished_semaphore(),
+                stage_mask: vk::PipelineStageFlags2::ALL_COMMANDS,
+            }),
             self.in_flight_frames.fence(),
         )?;
 
@@ -312,20 +317,20 @@ impl<B: App> BaseApp<B> {
             swapchain_image,
             vk::ImageLayout::UNDEFINED,
             vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-            vk::AccessFlags::empty(),
-            vk::AccessFlags::TRANSFER_WRITE,
-            vk::PipelineStageFlags::TOP_OF_PIPE,
-            vk::PipelineStageFlags::TRANSFER,
+            vk::AccessFlags2::NONE,
+            vk::AccessFlags2::TRANSFER_WRITE,
+            vk::PipelineStageFlags2::NONE,
+            vk::PipelineStageFlags2::TRANSFER,
         );
 
         buffer.transition_layout(
             storage_image,
             vk::ImageLayout::GENERAL,
             vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
-            vk::AccessFlags::empty(),
-            vk::AccessFlags::TRANSFER_READ,
-            vk::PipelineStageFlags::TOP_OF_PIPE,
-            vk::PipelineStageFlags::TRANSFER,
+            vk::AccessFlags2::NONE,
+            vk::AccessFlags2::TRANSFER_READ,
+            vk::PipelineStageFlags2::NONE,
+            vk::PipelineStageFlags2::TRANSFER,
         );
 
         buffer.copy_image(
@@ -339,20 +344,20 @@ impl<B: App> BaseApp<B> {
             swapchain_image,
             vk::ImageLayout::TRANSFER_DST_OPTIMAL,
             vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-            vk::AccessFlags::TRANSFER_WRITE,
-            vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
-            vk::PipelineStageFlags::TRANSFER,
-            vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+            vk::AccessFlags2::TRANSFER_WRITE,
+            vk::AccessFlags2::COLOR_ATTACHMENT_WRITE,
+            vk::PipelineStageFlags2::TRANSFER,
+            vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
         );
 
         buffer.transition_layout(
             storage_image,
             vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
             vk::ImageLayout::GENERAL,
-            vk::AccessFlags::TRANSFER_READ,
-            vk::AccessFlags::empty(),
-            vk::PipelineStageFlags::TRANSFER,
-            vk::PipelineStageFlags::TOP_OF_PIPE,
+            vk::AccessFlags2::TRANSFER_READ,
+            vk::AccessFlags2::NONE,
+            vk::PipelineStageFlags2::TRANSFER,
+            vk::PipelineStageFlags2::ALL_COMMANDS,
         );
 
         // Gui pass
@@ -366,10 +371,10 @@ impl<B: App> BaseApp<B> {
             swapchain_image,
             vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
             vk::ImageLayout::PRESENT_SRC_KHR,
-            vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
-            vk::AccessFlags::COLOR_ATTACHMENT_READ,
-            vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-            vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+            vk::AccessFlags2::COLOR_ATTACHMENT_WRITE,
+            vk::AccessFlags2::COLOR_ATTACHMENT_READ,
+            vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
+            vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
         );
 
         buffer.end()?;
@@ -402,10 +407,10 @@ fn create_storage_images(
                 &image,
                 vk::ImageLayout::UNDEFINED,
                 vk::ImageLayout::GENERAL,
-                vk::AccessFlags::empty(),
-                vk::AccessFlags::empty(),
-                vk::PipelineStageFlags::TOP_OF_PIPE,
-                vk::PipelineStageFlags::TOP_OF_PIPE,
+                vk::AccessFlags2::NONE,
+                vk::AccessFlags2::NONE,
+                vk::PipelineStageFlags2::NONE,
+                vk::PipelineStageFlags2::ALL_COMMANDS,
             );
         })?;
 

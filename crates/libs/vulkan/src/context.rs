@@ -143,6 +143,7 @@ fn select_suitable_physical_device(
                 && !device.supported_surface_formats.is_empty()
                 && !device.supported_present_modes.is_empty()
                 && device.supports_dynamic_rendering
+                && device.supports_synchronization2
         })
         .ok_or_else(|| anyhow::anyhow!("Could not find a suitable device"))?;
 
@@ -176,7 +177,7 @@ impl VkContext {
         // Submit and wait
         let fence = self.create_fence(None)?;
         self.graphics_queue
-            .submit(&command_buffer, None, None, None, &fence)?;
+            .submit(&command_buffer, None, None, &fence)?;
         fence.wait(None)?;
 
         // Free
