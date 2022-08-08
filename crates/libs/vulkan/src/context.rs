@@ -52,7 +52,12 @@ impl VkContext {
         log::info!("Selected physical device: {:?}", physical_device.name);
 
         let queue_families = [graphics_queue_family, present_queue_family];
-        let device = Arc::new(VkDevice::new(&instance, &physical_device, &queue_families)?);
+        let device = Arc::new(VkDevice::new(
+            &instance,
+            &physical_device,
+            &queue_families,
+            required_extensions,
+        )?);
         let graphics_queue = device.get_queue(graphics_queue_family, 0);
         let present_queue = device.get_queue(present_queue_family, 0);
 

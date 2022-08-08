@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{ffi::CString, sync::Arc};
 
 use anyhow::Result;
 use ash::{vk, Device};
@@ -18,6 +18,7 @@ impl VkDevice {
         instance: &VkInstance,
         physical_device: &VkPhysicalDevice,
         queue_families: &[VkQueueFamily],
+        required_extensions: &[&str],
     ) -> Result<Self> {
         let queue_priorities = [1.0f32];
 
@@ -36,13 +37,14 @@ impl VkDevice {
                 .collect::<Vec<_>>()
         };
 
-        // TODO: pass in as args
-        let device_extensions_ptrs = [
-            ash::extensions::khr::Swapchain::name().as_ptr(),
-            ash::extensions::khr::RayTracingPipeline::name().as_ptr(),
-            ash::extensions::khr::AccelerationStructure::name().as_ptr(),
-            ash::extensions::khr::DeferredHostOperations::name().as_ptr(),
-        ];
+        let device_extensions_ptrs = required_extensions
+            .iter()
+            .map(|e| CString::new(*e))
+            .collect::<Result<Vec<_>, _>>()?;
+        let device_extensions_ptrs = device_extensions_ptrs
+            .iter()
+            .map(|e| e.as_ptr())
+            .collect::<Vec<_>>();
 
         let mut ray_tracing_feature =
             vk::PhysicalDeviceRayTracingPipelineFeaturesKHR::builder().ray_tracing_pipeline(true);
