@@ -313,25 +313,26 @@ impl<B: App> BaseApp<B> {
         base_app.record_command(self, buffer, image_index)?;
 
         // Copy ray tracing result into swapchain
-        buffer.transition_layout(
-            swapchain_image,
-            vk::ImageLayout::UNDEFINED,
-            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-            vk::AccessFlags2::NONE,
-            vk::AccessFlags2::TRANSFER_WRITE,
-            vk::PipelineStageFlags2::NONE,
-            vk::PipelineStageFlags2::TRANSFER,
-        );
-
-        buffer.transition_layout(
-            storage_image,
-            vk::ImageLayout::GENERAL,
-            vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
-            vk::AccessFlags2::NONE,
-            vk::AccessFlags2::TRANSFER_READ,
-            vk::PipelineStageFlags2::NONE,
-            vk::PipelineStageFlags2::TRANSFER,
-        );
+        buffer.pipeline_image_barriers(&[
+            VkImageBarrier {
+                image: swapchain_image,
+                old_layout: vk::ImageLayout::UNDEFINED,
+                new_layout: vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                src_access_mask: vk::AccessFlags2::NONE,
+                dst_access_mask: vk::AccessFlags2::TRANSFER_WRITE,
+                src_stage_mask: vk::PipelineStageFlags2::NONE,
+                dst_stage_mask: vk::PipelineStageFlags2::TRANSFER,
+            },
+            VkImageBarrier {
+                image: storage_image,
+                old_layout: vk::ImageLayout::GENERAL,
+                new_layout: vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
+                src_access_mask: vk::AccessFlags2::SHADER_WRITE,
+                dst_access_mask: vk::AccessFlags2::TRANSFER_READ,
+                src_stage_mask: vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+                dst_stage_mask: vk::PipelineStageFlags2::TRANSFER,
+            },
+        ]);
 
         buffer.copy_image(
             storage_image,
@@ -340,25 +341,26 @@ impl<B: App> BaseApp<B> {
             vk::ImageLayout::TRANSFER_DST_OPTIMAL,
         );
 
-        buffer.transition_layout(
-            swapchain_image,
-            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-            vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-            vk::AccessFlags2::TRANSFER_WRITE,
-            vk::AccessFlags2::COLOR_ATTACHMENT_WRITE,
-            vk::PipelineStageFlags2::TRANSFER,
-            vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
-        );
-
-        buffer.transition_layout(
-            storage_image,
-            vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
-            vk::ImageLayout::GENERAL,
-            vk::AccessFlags2::TRANSFER_READ,
-            vk::AccessFlags2::NONE,
-            vk::PipelineStageFlags2::TRANSFER,
-            vk::PipelineStageFlags2::ALL_COMMANDS,
-        );
+        buffer.pipeline_image_barriers(&[
+            VkImageBarrier {
+                image: swapchain_image,
+                old_layout: vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                new_layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+                src_access_mask: vk::AccessFlags2::TRANSFER_WRITE,
+                dst_access_mask: vk::AccessFlags2::COLOR_ATTACHMENT_WRITE,
+                src_stage_mask: vk::PipelineStageFlags2::TRANSFER,
+                dst_stage_mask: vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
+            },
+            VkImageBarrier {
+                image: storage_image,
+                old_layout: vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
+                new_layout: vk::ImageLayout::GENERAL,
+                src_access_mask: vk::AccessFlags2::TRANSFER_READ,
+                dst_access_mask: vk::AccessFlags2::NONE,
+                src_stage_mask: vk::PipelineStageFlags2::TRANSFER,
+                dst_stage_mask: vk::PipelineStageFlags2::ALL_COMMANDS,
+            },
+        ]);
 
         // Gui pass
         buffer.begin_rendering(swapchain_image_view, self.swapchain.extent);
@@ -367,15 +369,15 @@ impl<B: App> BaseApp<B> {
 
         buffer.end_rendering();
 
-        buffer.transition_layout(
-            swapchain_image,
-            vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-            vk::ImageLayout::PRESENT_SRC_KHR,
-            vk::AccessFlags2::COLOR_ATTACHMENT_WRITE,
-            vk::AccessFlags2::COLOR_ATTACHMENT_READ,
-            vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
-            vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
-        );
+        buffer.pipeline_image_barriers(&[VkImageBarrier {
+            image: swapchain_image,
+            old_layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+            new_layout: vk::ImageLayout::PRESENT_SRC_KHR,
+            src_access_mask: vk::AccessFlags2::COLOR_ATTACHMENT_WRITE,
+            dst_access_mask: vk::AccessFlags2::COLOR_ATTACHMENT_READ,
+            src_stage_mask: vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
+            dst_stage_mask: vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
+        }]);
 
         buffer.end()?;
 
@@ -403,15 +405,15 @@ fn create_storage_images(
         let view = image.create_image_view()?;
 
         context.execute_one_time_commands(|cmd_buffer| {
-            cmd_buffer.transition_layout(
-                &image,
-                vk::ImageLayout::UNDEFINED,
-                vk::ImageLayout::GENERAL,
-                vk::AccessFlags2::NONE,
-                vk::AccessFlags2::NONE,
-                vk::PipelineStageFlags2::NONE,
-                vk::PipelineStageFlags2::ALL_COMMANDS,
-            );
+            cmd_buffer.pipeline_image_barriers(&[VkImageBarrier {
+                image: &image,
+                old_layout: vk::ImageLayout::UNDEFINED,
+                new_layout: vk::ImageLayout::GENERAL,
+                src_access_mask: vk::AccessFlags2::NONE,
+                dst_access_mask: vk::AccessFlags2::NONE,
+                src_stage_mask: vk::PipelineStageFlags2::NONE,
+                dst_stage_mask: vk::PipelineStageFlags2::ALL_COMMANDS,
+            }]);
         })?;
 
         images.push(ImageAndView { image, view })

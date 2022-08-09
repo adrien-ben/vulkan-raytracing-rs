@@ -176,34 +176,30 @@ impl VkCommandBuffer {
         };
     }
 
-    pub fn transition_layout(
-        &self,
-        image: &VkImage,
-        old_layout: vk::ImageLayout,
-        new_layout: vk::ImageLayout,
-        src_access_mask: vk::AccessFlags2,
-        dst_access_mask: vk::AccessFlags2,
-        src_stage_mask: vk::PipelineStageFlags2,
-        dst_stage_mask: vk::PipelineStageFlags2,
-    ) {
-        let image_memory_barrier = vk::ImageMemoryBarrier2::builder()
-            .src_stage_mask(src_stage_mask)
-            .src_access_mask(src_access_mask)
-            .old_layout(old_layout)
-            .dst_stage_mask(dst_stage_mask)
-            .dst_access_mask(dst_access_mask)
-            .new_layout(new_layout)
-            .image(image.inner)
-            .subresource_range(vk::ImageSubresourceRange {
-                aspect_mask: vk::ImageAspectFlags::COLOR,
-                base_mip_level: 0,
-                level_count: 1,
-                base_array_layer: 0,
-                layer_count: 1,
-            });
+    pub fn pipeline_image_barriers(&self, barriers: &[VkImageBarrier]) {
+        let barriers = barriers
+            .iter()
+            .map(|b| {
+                vk::ImageMemoryBarrier2::builder()
+                    .src_stage_mask(b.src_stage_mask)
+                    .src_access_mask(b.src_access_mask)
+                    .old_layout(b.old_layout)
+                    .dst_stage_mask(b.dst_stage_mask)
+                    .dst_access_mask(b.dst_access_mask)
+                    .new_layout(b.new_layout)
+                    .image(b.image.inner)
+                    .subresource_range(vk::ImageSubresourceRange {
+                        aspect_mask: vk::ImageAspectFlags::COLOR,
+                        base_mip_level: 0,
+                        level_count: 1,
+                        base_array_layer: 0,
+                        layer_count: 1,
+                    })
+                    .build()
+            })
+            .collect::<Vec<_>>();
 
-        let dependency_info = vk::DependencyInfo::builder()
-            .image_memory_barriers(std::slice::from_ref(&image_memory_barrier));
+        let dependency_info = vk::DependencyInfo::builder().image_memory_barriers(&barriers);
 
         unsafe {
             self.device
@@ -333,4 +329,14 @@ impl VkCommandBuffer {
     pub fn end_rendering(&self) {
         unsafe { self.device.inner.cmd_end_rendering(self.inner) };
     }
+}
+
+pub struct VkImageBarrier<'a> {
+    pub image: &'a VkImage,
+    pub old_layout: vk::ImageLayout,
+    pub new_layout: vk::ImageLayout,
+    pub src_access_mask: vk::AccessFlags2,
+    pub dst_access_mask: vk::AccessFlags2,
+    pub src_stage_mask: vk::PipelineStageFlags2,
+    pub dst_stage_mask: vk::PipelineStageFlags2,
 }
