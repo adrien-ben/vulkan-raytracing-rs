@@ -171,7 +171,7 @@ impl VkContext {
             .allocate_command_buffer(vk::CommandBufferLevel::PRIMARY)?;
 
         // Begin recording
-        command_buffer.begin(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT)?;
+        command_buffer.begin(Some(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT))?;
 
         // Execute user function
         let executor_result = executor(&command_buffer);

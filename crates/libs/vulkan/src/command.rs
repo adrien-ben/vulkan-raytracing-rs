@@ -109,8 +109,9 @@ pub struct VkCommandBuffer {
 }
 
 impl VkCommandBuffer {
-    pub fn begin(&self, flags: vk::CommandBufferUsageFlags) -> Result<()> {
-        let begin_info = vk::CommandBufferBeginInfo::builder().flags(flags);
+    pub fn begin(&self, flags: Option<vk::CommandBufferUsageFlags>) -> Result<()> {
+        let begin_info = vk::CommandBufferBeginInfo::builder()
+            .flags(flags.unwrap_or(vk::CommandBufferUsageFlags::empty()));
         unsafe {
             self.device
                 .inner

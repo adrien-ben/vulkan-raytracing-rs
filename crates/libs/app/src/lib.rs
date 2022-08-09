@@ -308,7 +308,7 @@ impl<B: App> BaseApp<B> {
 
         buffer.reset()?;
 
-        buffer.begin(vk::CommandBufferUsageFlags::SIMULTANEOUS_USE)?;
+        buffer.begin(None)?;
 
         base_app.record_command(self, buffer, image_index)?;
 
