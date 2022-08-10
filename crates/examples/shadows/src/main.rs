@@ -152,13 +152,13 @@ impl App for Shadows {
         storage_images.iter().enumerate().for_each(|(index, img)| {
             let set = &self.descriptor_res.dynamic_sets[index];
 
-            set.update_one(VkWriteDescriptorSet {
+            set.update(&[VkWriteDescriptorSet {
                 binding: 1,
                 kind: VkWriteDescriptorSetKind::StorageImage {
                     layout: vk::ImageLayout::GENERAL,
                     view: &img.view,
                 },
-            });
+            }]);
         });
 
         Ok(())
@@ -779,24 +779,24 @@ fn create_descriptor_sets(
         let view = &model.views[*image_index];
         let sampler = &model.samplers[*sampler_index];
 
-        static_set.update_one(VkWriteDescriptorSet {
+        static_set.update(&[VkWriteDescriptorSet {
             binding: 6,
             kind: VkWriteDescriptorSetKind::CombinedImageSampler {
                 view,
                 sampler,
                 layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
             },
-        })
+        }]);
     }
 
     dynamic_sets.iter().enumerate().for_each(|(index, set)| {
-        set.update_one(VkWriteDescriptorSet {
+        set.update(&[VkWriteDescriptorSet {
             binding: 1,
             kind: VkWriteDescriptorSetKind::StorageImage {
                 layout: vk::ImageLayout::GENERAL,
                 view: &storage_imgs[index].view,
             },
-        });
+        }]);
     });
 
     Ok(DescriptorRes {

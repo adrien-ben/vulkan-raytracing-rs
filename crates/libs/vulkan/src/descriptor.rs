@@ -95,113 +95,107 @@ pub struct VkDescriptorSet {
 }
 
 impl VkDescriptorSet {
-    pub fn update_one(&self, write: VkWriteDescriptorSet) {
-        use VkWriteDescriptorSetKind::*;
-        match write.kind {
-            StorageImage { view, layout } => {
-                let img_info = vk::DescriptorImageInfo::builder()
-                    .image_view(view.inner)
-                    .image_layout(layout);
-                let write = vk::WriteDescriptorSet::builder()
-                    .descriptor_type(vk::DescriptorType::STORAGE_IMAGE)
-                    .dst_binding(write.binding)
-                    .dst_set(self.inner)
-                    .image_info(std::slice::from_ref(&img_info));
-
-                unsafe {
-                    self.device
-                        .inner
-                        .update_descriptor_sets(std::slice::from_ref(&write), &[])
-                };
-            }
-            AccelerationStructure {
-                acceleration_structure,
-            } => {
-                let mut write_set_as = vk::WriteDescriptorSetAccelerationStructureKHR::builder()
-                    .acceleration_structures(std::slice::from_ref(&acceleration_structure.inner));
-
-                let mut write = vk::WriteDescriptorSet::builder()
-                    .descriptor_type(vk::DescriptorType::ACCELERATION_STRUCTURE_KHR)
-                    .dst_binding(write.binding)
-                    .dst_set(self.inner)
-                    .push_next(&mut write_set_as)
-                    .build();
-                write.descriptor_count = 1;
-
-                unsafe {
-                    self.device
-                        .inner
-                        .update_descriptor_sets(std::slice::from_ref(&write), &[])
-                };
-            }
-            UniformBuffer { buffer } => {
-                update_buffer_descriptor_sets(
-                    &self.device,
-                    self,
-                    write.binding,
-                    buffer,
-                    vk::DescriptorType::UNIFORM_BUFFER,
-                );
-            }
-            StorageBuffer { buffer } => {
-                update_buffer_descriptor_sets(
-                    &self.device,
-                    self,
-                    write.binding,
-                    buffer,
-                    vk::DescriptorType::STORAGE_BUFFER,
-                );
-            }
-            CombinedImageSampler {
-                view,
-                sampler,
-                layout,
-            } => {
-                let img_info = vk::DescriptorImageInfo::builder()
-                    .image_view(view.inner)
-                    .sampler(sampler.inner)
-                    .image_layout(layout);
-                let write = vk::WriteDescriptorSet::builder()
-                    .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                    .dst_binding(write.binding)
-                    .dst_set(self.inner)
-                    .image_info(std::slice::from_ref(&img_info));
-
-                unsafe {
-                    self.device
-                        .inner
-                        .update_descriptor_sets(std::slice::from_ref(&write), &[])
-                };
-            }
-        }
-    }
-
     pub fn update(&self, writes: &[VkWriteDescriptorSet]) {
-        writes.iter().for_each(|w| self.update_one(*w));
+        use VkWriteDescriptorSetKind::*;
+
+        // these Vec are here to keep structure internal to WriteDescriptorSet (DescriptorImageInfo, DescriptorBufferInfo, ...) alive
+        let mut img_infos = vec![];
+        let mut buffer_infos = vec![];
+        let mut as_infos = vec![];
+
+        let descriptor_writes = writes
+            .iter()
+            .map(|write| match write.kind {
+                StorageImage { view, layout } => {
+                    let img_info = vk::DescriptorImageInfo::builder()
+                        .image_view(view.inner)
+                        .image_layout(layout);
+
+                    img_infos.push(img_info);
+
+                    vk::WriteDescriptorSet::builder()
+                        .descriptor_type(vk::DescriptorType::STORAGE_IMAGE)
+                        .dst_binding(write.binding)
+                        .dst_set(self.inner)
+                        .image_info(std::slice::from_ref(img_infos.last().unwrap()))
+                        .build()
+                }
+                AccelerationStructure {
+                    acceleration_structure,
+                } => {
+                    let write_set_as = vk::WriteDescriptorSetAccelerationStructureKHR::builder()
+                        .acceleration_structures(std::slice::from_ref(
+                            &acceleration_structure.inner,
+                        ));
+
+                    as_infos.push(write_set_as);
+
+                    let mut write = vk::WriteDescriptorSet::builder()
+                        .descriptor_type(vk::DescriptorType::ACCELERATION_STRUCTURE_KHR)
+                        .dst_binding(write.binding)
+                        .dst_set(self.inner)
+                        .push_next(as_infos.last_mut().unwrap())
+                        .build();
+                    write.descriptor_count = 1;
+
+                    write
+                }
+                UniformBuffer { buffer } => {
+                    let buffer_info = vk::DescriptorBufferInfo::builder()
+                        .buffer(buffer.inner)
+                        .range(vk::WHOLE_SIZE);
+
+                    buffer_infos.push(buffer_info);
+
+                    vk::WriteDescriptorSet::builder()
+                        .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
+                        .dst_binding(write.binding)
+                        .dst_set(self.inner)
+                        .buffer_info(std::slice::from_ref(buffer_infos.last().unwrap()))
+                        .build()
+                }
+                StorageBuffer { buffer } => {
+                    let buffer_info = vk::DescriptorBufferInfo::builder()
+                        .buffer(buffer.inner)
+                        .range(vk::WHOLE_SIZE);
+
+                    buffer_infos.push(buffer_info);
+
+                    vk::WriteDescriptorSet::builder()
+                        .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                        .dst_binding(write.binding)
+                        .dst_set(self.inner)
+                        .buffer_info(std::slice::from_ref(buffer_infos.last().unwrap()))
+                        .build()
+                }
+                CombinedImageSampler {
+                    view,
+                    sampler,
+                    layout,
+                } => {
+                    let img_info = vk::DescriptorImageInfo::builder()
+                        .image_view(view.inner)
+                        .sampler(sampler.inner)
+                        .image_layout(layout);
+
+                    img_infos.push(img_info);
+
+                    vk::WriteDescriptorSet::builder()
+                        .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                        .dst_binding(write.binding)
+                        .dst_set(self.inner)
+                        .image_info(std::slice::from_ref(img_infos.last().unwrap()))
+                        .build()
+                }
+            })
+            .collect::<Vec<_>>();
+
+        unsafe {
+            self.device
+                .inner
+                .update_descriptor_sets(&descriptor_writes, &[])
+        };
     }
-}
-
-fn update_buffer_descriptor_sets(
-    device: &VkDevice,
-    set: &VkDescriptorSet,
-    binding: u32,
-    buffer: &VkBuffer,
-    descriptor_type: vk::DescriptorType,
-) {
-    let buffer_info = vk::DescriptorBufferInfo::builder()
-        .buffer(buffer.inner)
-        .range(vk::WHOLE_SIZE);
-    let write = vk::WriteDescriptorSet::builder()
-        .descriptor_type(descriptor_type)
-        .dst_binding(binding)
-        .dst_set(set.inner)
-        .buffer_info(std::slice::from_ref(&buffer_info));
-
-    unsafe {
-        device
-            .inner
-            .update_descriptor_sets(std::slice::from_ref(&write), &[])
-    };
 }
 
 impl VkContext {

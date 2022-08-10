@@ -89,13 +89,13 @@ impl App for Triangle {
         storage_images.iter().enumerate().for_each(|(index, img)| {
             let set = &self.descriptor_res.dynamic_sets[index];
 
-            set.update_one(VkWriteDescriptorSet {
+            set.update(&[VkWriteDescriptorSet {
                 binding: 1,
                 kind: VkWriteDescriptorSetKind::StorageImage {
                     layout: vk::ImageLayout::GENERAL,
                     view: &img.view,
                 },
-            });
+            }]);
         });
 
         Ok(())
@@ -342,21 +342,21 @@ fn create_descriptor_sets(
     let static_set = pool.allocate_set(&pipeline_res.static_dsl)?;
     let dynamic_sets = pool.allocate_sets(&pipeline_res.dynamic_dsl, set_count)?;
 
-    static_set.update_one(VkWriteDescriptorSet {
+    static_set.update(&[VkWriteDescriptorSet {
         binding: 0,
         kind: VkWriteDescriptorSetKind::AccelerationStructure {
             acceleration_structure: &top_as.inner,
         },
-    });
+    }]);
 
     dynamic_sets.iter().enumerate().for_each(|(index, set)| {
-        set.update_one(VkWriteDescriptorSet {
+        set.update(&[VkWriteDescriptorSet {
             binding: 1,
             kind: VkWriteDescriptorSetKind::StorageImage {
                 layout: vk::ImageLayout::GENERAL,
                 view: &storage_imgs[index].view,
             },
-        });
+        }]);
     });
 
     Ok(DescriptorRes {
